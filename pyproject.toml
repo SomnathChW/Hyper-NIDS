@@ -1,0 +1,16 @@
+[project]
+name = "hyper-nids"
+version = "0.1.0"
+description = "Hyperbolic Prototypical Networks for Open-Set NIDS"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.7",
+    "numpy>=2.0",
+    "pandas>=2.0",
+    "scikit-learn>=1.5",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+]

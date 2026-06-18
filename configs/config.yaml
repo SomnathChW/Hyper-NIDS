@@ -1,0 +1,75 @@
+# PoincaréBall Experiment Configuration
+# ======================================
+# Toggle `method` between "euclidean" and "poincare" and re-run
+# to produce the ablation comparison.
+
+random_state: 42
+
+# ── Data settings ────────────────────────────────────────────────
+data:
+  data_path: "/home/somnath/data/Downsampled"    # Folder of CSVs/Parquets
+  scaler: "standard"                              # "standard" | "robust" | "minmax"
+  validation_split: 0.2
+  columns:
+    Category: { role: "target" }
+    Flow ID: { role: "drop" }
+    Src IP: { role: "drop" }
+    Src Port: { role: "drop" }
+    Dst IP: { role: "drop" }
+    Dst Port: { role: "drop" }
+    Label: { role: "drop" }
+    Attack Name: { role: "drop" }
+
+# ── Shared backbone architecture (identical for both methods) ────
+backbone:
+  hidden_layers: [256, 196, 128]
+  embedding_dim: 64
+  activation: "relu"
+  dropout_rate: 0.0
+
+# ── Training hyperparameters (shared) ────────────────────────────
+training:
+  epochs: 100
+  batch_size: 2048
+  learning_rate: 0.0005
+  early_stopping_patience: 25
+  reduce_lr_patience: 10
+  reduce_lr_factor: 0.5
+  min_learning_rate: 1.0e-06
+  threshold_percentile: 95
+
+# ── Method toggle ────────────────────────────────────────────────
+method: "poincare"   # "euclidean" or "poincare"
+
+# ── Euclidean-specific settings ──────────────────────────────────
+euclidean:
+  distance_metric: "squared_euclidean"    # "euclidean" | "squared_euclidean"
+  distance_temperature: 0.1
+  embedding_l2_normalize: true
+
+  # Bounded Center Loss (toggleable)
+  # Penalizes embeddings drifting outside radius R from their class centroid.
+  # Set center_loss_radius to 0.0 to disable.
+  center_loss_radius: 0.8                 # R: safe-zone radius (0.0 = disabled)
+  center_loss_weight: 0.1                 # λ_cl: scales penalty vs prototypical loss
+
+  # Supervised Contrastive Loss (toggleable)
+  # Pulls same-class embeddings together, pushes different-class apart.
+  # Set supcon_weight to 0.0 to disable.
+  supcon_weight: 0.05                     # λ_sc: scales SupCon penalty (0.0 = disabled)
+  supcon_temperature: 0.07                # τ_sc: sharpness of contrastive distribution
+
+# ── Poincaré-specific settings ───────────────────────────────────
+poincare:
+  curvature: 1.0                          # -c, negative curvature (c > 0)
+  clip_radius: 0.95                       # Max norm for numerical stability
+  prototype_placement_radius: 0.95        # How close to boundary for prototypes
+
+# ── Output paths ─────────────────────────────────────────────────
+model_dir: "models"
+results_dir: "results"
+
+# ── Plotting ─────────────────────────────────────────────────────
+plots:
+  save_training_plots: true
+  max_samples: 20000
