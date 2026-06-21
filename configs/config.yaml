@@ -8,6 +8,11 @@ random_state: 42
 # ── Data settings ────────────────────────────────────────────────
 data:
   data_path: "/home/somnath/data/Downsampled"    # Folder of CSVs/Parquets
+  max_samples_per_file: 100000                   # Max samples loaded per individual file
+  hold_out: null                                  # Substring(s) to exclude from training
+  # Examples for hold_out:
+  # hold_out: "ZeroDay_Folder"                    # Excludes an entire subfolder from training
+  # hold_out: ["ZeroDay_Folder", "botnet.parquet"] # Excludes multiple folders/files from training
   scaler: "standard"                              # "standard" | "robust" | "minmax"
   validation_split: 0.2
   columns:

@@ -37,7 +37,7 @@ from modules.utils.model_utils import load_checkpoint
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
-def run_testing(config: Dict[str, Any]) -> Dict[str, Any]:
+def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
     """
     Evaluate a trained model with Open-Set Recognition metrics.
 
@@ -50,25 +50,21 @@ def run_testing(config: Dict[str, Any]) -> Dict[str, Any]:
         6. Save result plots
 
     Args:
-        config: Full experiment config (same YAML as training).
-            Must also contain ``test_data_path`` or ``data.data_path``
-            for the test set.
+        method: The method to test ("euclidean" or "poincare").
+        test_data_path: Path to the test data.
 
     Returns:
         Dictionary with predictions, distances, metrics, and paths.
     """
     console = Console()
-
-    method = config["method"]
-    data_cfg = config["data"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     console.print(f"\n[bold]Device:[/bold] {device}")
 
     # ── [1] Load checkpoint ──────────────────────────────────────────
     console.print("\n[bold cyan][1/5] Loading checkpoint...[/bold cyan]")
     project_root = Path(__file__).parent.parent
-    model_dir = project_root / config.get("model_dir", "models")
-    results_dir = project_root / config.get("results_dir", "results") / method
+    model_dir = project_root / "models"
+    results_dir = project_root / "results" / method
     results_dir.mkdir(parents=True, exist_ok=True)
 
     artifacts = load_checkpoint(model_dir, method_name=method)
@@ -94,12 +90,15 @@ def run_testing(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── [2] Load test data ───────────────────────────────────────────
     console.print("\n[bold cyan][2/5] Loading test data...[/bold cyan]")
-    test_data_path = config.get("test_data_path") or data_cfg.get("data_path")
     if not test_data_path:
         console.print("[red]ERROR: No test data path specified.[/red]")
         return {"error": "No test data path"}
 
-    df_test = load_data(file_path=test_data_path)
+    max_samples_per_file = model_config.get("max_samples_per_file", 100000)
+    df_test = load_data(
+        file_path=test_data_path,
+        max_samples_per_file=max_samples_per_file,
+    )
 
     # ── [3] Preprocess ───────────────────────────────────────────────
     console.print("\n[bold cyan][3/5] Preprocessing...[/bold cyan]")
@@ -139,6 +138,10 @@ def run_testing(config: Dict[str, Any]) -> Dict[str, Any]:
     if y_test is not None and target_col:
         y_true = y_test.astype(str).to_numpy()
         known_labels = [str(c) for c in label_encoder.classes_]
+        
+        # Collapse all novel/held-out classes into "Unknown" for standard OSR evaluation
+        is_truly_known_mask = np.isin(y_true, known_labels)
+        y_true[~is_truly_known_mask] = "Unknown"
 
         test_metrics = _compute_osr_metrics(
             y_true, predictions, is_unknown, known_labels,
@@ -147,18 +150,16 @@ def run_testing(config: Dict[str, Any]) -> Dict[str, Any]:
         _print_metrics(console, test_metrics, method)
 
     # ── Save plots ───────────────────────────────────────────────────
-    plots_cfg = config.get("plots", {})
-    if plots_cfg.get("save_training_plots", False):
-        _save_test_plots(
-            embeddings.cpu().numpy(),
-            predictions,
-            min_distances,
-            is_unknown,
-            y_true,
-            label_encoder,
-            results_dir,
-            method,
-        )
+    _save_test_plots(
+        embeddings.cpu().numpy(),
+        predictions,
+        min_distances,
+        is_unknown,
+        y_true,
+        label_encoder,
+        results_dir,
+        method,
+    )
 
     # Cleanup
     del embeddings

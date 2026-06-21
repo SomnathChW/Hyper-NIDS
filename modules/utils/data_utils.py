@@ -8,7 +8,7 @@ configuration, feature/target splitting, and inf/NaN cleaning.
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Union, List
 
 
 # ── Column configuration ────────────────────────────────────────────────────
@@ -90,8 +90,11 @@ def configure_columns_from_dict(
 
 def load_data(
     file_path: Optional[str] = None,
+    max_samples_per_file: Optional[int] = 100000,
     sample_size: Optional[int] = None,
     random_state: int = 42,
+    exclude: Optional[Union[str, List[str]]] = None,
+    include_only: Optional[Union[str, List[str]]] = None,
 ) -> pd.DataFrame:
     """
     Load data from a file, a folder of files, or generate demo data.
@@ -110,8 +113,8 @@ def load_data(
 
         if file_path.is_dir():
             print(f"[INFO] Loading from folder: {file_path}")
-            csv_files = list(file_path.glob("*.csv"))
-            parquet_files = list(file_path.glob("*.parquet"))
+            csv_files = list(file_path.rglob("*.csv"))
+            parquet_files = list(file_path.rglob("*.parquet"))
             all_files = csv_files + parquet_files
 
             if not all_files:
@@ -124,8 +127,19 @@ def load_data(
                 f"and {len(parquet_files)} parquet file(s)"
             )
 
+            exclude_list = [exclude] if isinstance(exclude, str) else exclude
+            include_list = [include_only] if isinstance(include_only, str) else include_only
+
             dfs = []
             for i, data_file in enumerate(all_files, 1):
+                file_str = str(data_file)
+                if exclude_list and any(ex in file_str for ex in exclude_list):
+                    print(f"  [{i}/{len(all_files)}] Skipping (excluded): {data_file.name}")
+                    continue
+                if include_list and not any(inc in file_str for inc in include_list):
+                    print(f"  [{i}/{len(all_files)}] Skipping (not in include_only): {data_file.name}")
+                    continue
+
                 print(
                     f"  [{i}/{len(all_files)}] Loading: {data_file.name}...",
                     end=" ",
@@ -136,8 +150,15 @@ def load_data(
                     temp_df = pd.read_parquet(data_file)
                 else:
                     continue  # skip unsupported
+                
+                if max_samples_per_file is not None and len(temp_df) > max_samples_per_file:
+                    temp_df = temp_df.sample(n=max_samples_per_file, random_state=random_state)
+                    
                 print(f"✓ ({temp_df.shape[0]} rows)")
                 dfs.append(temp_df)
+
+            if not dfs:
+                raise ValueError("No files loaded after applying exclude/include filters.")
 
             df = pd.concat(dfs, ignore_index=True)
             print(
@@ -155,6 +176,10 @@ def load_data(
                 raise ValueError(
                     f"Unsupported file format: {file_path.suffix}"
                 )
+            
+            if max_samples_per_file is not None and len(df) > max_samples_per_file:
+                df = df.sample(n=max_samples_per_file, random_state=random_state)
+                
             print(f"✓ Loaded {df.shape[0]} rows, {df.shape[1]} columns")
         else:
             raise FileNotFoundError(f"Path does not exist: {file_path}")

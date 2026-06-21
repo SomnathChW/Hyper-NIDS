@@ -102,11 +102,18 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
     # ── [1] Load data ────────────────────────────────────────────────
     console.print("\n[bold cyan][1/7] Loading data...[/bold cyan]")
     data_path = data_cfg.get("data_path")
+    max_samples_per_file = data_cfg.get("max_samples_per_file", 100000)
+    hold_out = data_cfg.get("hold_out")
     if not data_path:
         console.print("[red]ERROR: data.data_path is required.[/red]")
         return {"error": "No data path"}
 
-    df = load_data(file_path=data_path)
+    df = load_data(
+        file_path=data_path,
+        max_samples_per_file=max_samples_per_file,
+        random_state=random_state,
+        exclude=hold_out,
+    )
 
     # ── [2] Configure columns & split ────────────────────────────────
     console.print("\n[bold cyan][2/7] Configuring columns...[/bold cyan]")
@@ -356,6 +363,8 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Serialisable model config (strip non-JSON types)
     serialisable_config = {k: v for k, v in model_config.items()}
+    serialisable_config["max_samples_per_file"] = max_samples_per_file
+    serialisable_config["hold_out"] = data_cfg.get("hold_out")
 
     saved_paths = save_checkpoint(
         model=model,

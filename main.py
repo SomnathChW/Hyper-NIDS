@@ -6,7 +6,6 @@ CLI entrypoint for training and testing.
 Usage:
     python main.py --train --config configs/config.yaml
     python main.py --test  --method poincare --data path/to/test.csv
-    python main.py --test  --config configs/config.yaml --data path/to/test.csv
 """
 
 import argparse
@@ -23,21 +22,24 @@ def main():
     )
 
     # Modes
-    parser.add_argument("--train", action="store_true", help="Train model")
-    parser.add_argument("--test", action="store_true", help="Test model")
+    mode_group = parser.add_argument_group("Modes")
+    mode_group.add_argument("--train", action="store_true", help="Train model")
+    mode_group.add_argument("--test", action="store_true", help="Test model")
 
-    # Config is required for training, optional for testing
-    parser.add_argument(
+    # Training options
+    train_group = parser.add_argument_group("Training Options")
+    train_group.add_argument(
         "--config", type=str, default=None,
-        help="Path to experiment config (.yaml) (Required for training)",
+        help="Path to experiment config (.yaml)",
     )
     
     # Testing options
-    parser.add_argument(
+    test_group = parser.add_argument_group("Testing Options")
+    test_group.add_argument(
         "--method", type=str, choices=["euclidean", "poincare"], default=None,
-        help="Method to test (Required if no config provided)",
+        help="Method to test",
     )
-    parser.add_argument(
+    test_group.add_argument(
         "--data", type=str, default=None,
         help="Path to test data CSV/Parquet",
     )
@@ -53,9 +55,13 @@ def main():
         print("[ERROR] Only one mode may be active at a time.")
         sys.exit(1)
 
-    # Load config if provided
+    # Load config if provided (only for training)
     config = {}
-    if args.config:
+    if args.train:
+        if not args.config:
+            print("[ERROR] --config is required for --train")
+            sys.exit(1)
+            
         config_path = Path(args.config)
         if not config_path.exists():
             print(f"[ERROR] Config file not found: {config_path}")
@@ -67,29 +73,24 @@ def main():
 
     try:
         if args.train:
-            if not config:
-                print("[ERROR] --config is required for --train")
-                sys.exit(1)
             from modules.train import run_training
             run_training(config)
 
         elif args.test:
-            if args.method:
-                config["method"] = args.method
-            if args.data:
-                config["test_data_path"] = args.data
-            
-            if "method" not in config:
-                print("[ERROR] Must specify --method or provide a --config with a method for testing.")
+            if args.config:
+                print("[ERROR] --config should not be used with --test.")
                 sys.exit(1)
                 
-            test_path = config.get("test_data_path") or config.get("data", {}).get("data_path")
-            if not test_path:
-                print("[ERROR] Must specify --data or provide a --config with a data path for testing.")
+            if not args.method:
+                print("[ERROR] Must specify --method for testing.")
+                sys.exit(1)
+            
+            if not args.data:
+                print("[ERROR] Must specify --data for testing.")
                 sys.exit(1)
 
             from modules.test import run_testing
-            run_testing(config)
+            run_testing(args.method, args.data)
 
     except Exception as e:
         print(f"\n[ERROR] {e}")
