@@ -125,6 +125,26 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
     X, y = split_features_and_target(df, column_config)
     del df
 
+    max_samples_per_class = data_cfg.get("max_samples_per_class")
+    if max_samples_per_class and y is not None:
+        console.print(f"  [bold cyan]Balancing classes (max {max_samples_per_class} per class)...[/bold cyan]")
+        import pandas as pd
+        indices = []
+        for class_label, group_indices in y.groupby(y).groups.items():
+            if len(group_indices) > max_samples_per_class:
+                sampled = pd.Series(list(group_indices)).sample(n=max_samples_per_class, random_state=random_state).tolist()
+                indices.extend(sampled)
+            else:
+                indices.extend(list(group_indices))
+        
+        # Shuffle indices to break any class ordering
+        np.random.seed(random_state)
+        np.random.shuffle(indices)
+        
+        X = X.loc[indices].reset_index(drop=True)
+        y = y.loc[indices].reset_index(drop=True)
+        console.print(f"✓ Balanced data shape: {X.shape}")
+
     console.print("\n[bold cyan][4/7] Preprocessing & scaling...[/bold cyan]")
     X = preprocess_data(X, handle_inf=True, handle_nan=True, fill_value=0)
 

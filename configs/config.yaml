@@ -9,6 +9,7 @@ random_state: 42
 data:
   data_path: "/home/somnath/data/Downsampled"    # Folder of CSVs/Parquets
   max_samples_per_file: 100000                   # Max samples loaded per individual file
+  max_samples_per_class: 100000                  # Global cap per class across ALL files of that class
   hold_out: null                                  # Substring(s) to exclude from training
   # Examples for hold_out:
   # hold_out: "ZeroDay_Folder"                    # Excludes an entire subfolder from training
