@@ -176,37 +176,26 @@ def hyperbolic_prototypical_loss(
     labels: Tensor,
     prototypes: Tensor,
     curvature: float = 1.0,
-    temperature: float = 0.1,
-    centripetal_weight: float = 1.0,
-    centripetal_target_norm: float = 0.5,
+    temperature: float = 1.0,
 ) -> Tensor:
     """
-    Prototypical loss using Poincaré geodesic distance + centripetal regulariser.
+    Prototypical loss using Poincaré geodesic distance.
 
-    ``L = L_proto + λ · L_centripetal``
+    ``L = -mean(log_softmax(-d / τ)[correct])``
 
-    Where:
-      - L_proto        = ``-mean(log_softmax(-d / τ)[correct])``
-      - L_centripetal   = ``mean(relu(‖x‖ - r_target)²)``
-
-    The centripetal term creates the *centre-void* effect: it opposes the
-    prototypical pull toward prototypes, keeping known-class embeddings at
-    moderate radius.  At test time, OOD data that the network hasn't learnt
-    to "push" toward any prototype stays near the origin or wanders to the
-    boundary — both detectable.
+    Pure geometry — no auxiliary losses.  The Poincaré metric itself
+    provides exponentially growing resolution near the boundary,
+    enabling tight class clusters with natural separation.
 
     Args:
         embeddings: Batch embeddings inside the Poincaré ball ``[B, D]``.
         labels: Integer class labels ``[B]``.
-        prototypes: Class prototypes ``[C, D]``.
+        prototypes: Frozen boundary prototypes ``[C, D]``.
         curvature: Absolute curvature *c* > 0.
-        temperature: Softmax scaling τ (lower → sharper).
-        centripetal_weight: Scale factor λ for the centripetal term.
-        centripetal_target_norm: Euclidean-norm ceiling *r_target*
-            beyond which the penalty activates.
+        temperature: Softmax scaling τ (default 1.0 = unscaled).
 
     Returns:
-        Scalar composite loss.
+        Scalar loss.
     """
     # ── Pairwise Poincaré distances [B, C] ───────────────────────────
     distances = poincare_distance(
@@ -215,19 +204,12 @@ def hyperbolic_prototypical_loss(
         c=curvature,
     )                                                    # [B, C]
 
-    # ── Prototypical loss (temperature-scaled) ───────────────────────
+    # ── Prototypical loss ────────────────────────────────────────────
     scaled_logits = -distances / temperature
     log_probs = F.log_softmax(scaled_logits, dim=1)
 
     labels_idx = labels.unsqueeze(1).long()
     correct_log_probs = torch.gather(log_probs, 1, labels_idx).squeeze(1)
-    proto_loss = -correct_log_probs.mean()
-
-    # ── Centripetal regulariser (origin-pull) ────────────────────────
-    loss = proto_loss
-    if centripetal_weight > 0:
-        emb_norms = torch.norm(embeddings, p=2, dim=-1)
-        centripetal_loss = F.relu(emb_norms - centripetal_target_norm).pow(2).mean()
-        loss = loss + centripetal_weight * centripetal_loss
+    loss = -correct_log_probs.mean()
 
     return loss

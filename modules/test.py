@@ -231,6 +231,16 @@ def _classify(
         if dist_val > tau_k:
             is_unknown[i] = True
 
+    # Poincaré: additional origin-distance criterion
+    if method == "poincare" and "origin" in thresholds:
+        origin_dists = origin_distance(
+            embeddings, c=config.get("curvature", 1.0),
+        ).cpu().numpy()
+        origin_threshold = thresholds["origin"]
+        # Samples too close to origin → unknown
+        origin_unknown = origin_dists < origin_threshold
+        is_unknown = is_unknown | origin_unknown
+
     # Mark unknowns
     predictions[is_unknown] = "Unknown"
 
