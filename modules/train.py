@@ -356,8 +356,8 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Print thresholds
     console.print(f"\n  Global threshold τ: {thresholds['global']:.4f}")
-    if "origin" in thresholds:
-        console.print(f"  Origin threshold τ₀: {thresholds['origin']:.4f}")
+    if "origin_min" in thresholds:
+        console.print(f"  Origin band: [{thresholds['origin_min']:.4f}, {thresholds['origin_max']:.4f}]")
     for cls_idx, tau_k in sorted(per_class_thresholds.items()):
         cls_name = label_encoder.classes_[cls_idx]
         console.print(f"    τ({cls_name}) = {tau_k:.4f}")
@@ -456,6 +456,9 @@ def _compute_loss(
         return hyperbolic_prototypical_loss(
             embeddings, labels, prototypes,
             curvature=config.get("curvature", 1.0),
+            temperature=config.get("temperature", 0.1),
+            centripetal_weight=config.get("centripetal_weight", 1.0),
+            centripetal_target_norm=config.get("centripetal_target_norm", 0.5),
         )
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -506,12 +509,18 @@ def _compute_thresholds(
     global_threshold = float(np.percentile(own_dists_np, percentile))
     thresholds = {"global": global_threshold}
 
-    # Poincaré: also compute origin-distance threshold
+    # Poincaré: origin-distance band thresholds (centre-void + boundary)
     if method == "poincare":
         c = config.get("curvature", 1.0)
         origin_dists = origin_distance(embeddings, c=c)
-        thresholds["origin"] = float(
-            np.percentile(origin_dists.cpu().numpy(), 100.0 - percentile)
+        origin_dists_np = origin_dists.cpu().numpy()
+        # Samples closer to origin than this → unknown (no class confidence)
+        thresholds["origin_min"] = float(
+            np.percentile(origin_dists_np, 100.0 - percentile)
+        )
+        # Samples farther from origin than this → unknown (boundary outlier)
+        thresholds["origin_max"] = float(
+            np.percentile(origin_dists_np, percentile)
         )
 
     # Per-class thresholds
@@ -564,9 +573,16 @@ def _print_training_panel(
         lines.append(f"[bold]Curvature:[/bold] c={model_config.get('curvature', 1.0)}")
         lines.append(
             f"[bold]Prototype radius:[/bold] "
-            f"{model_config.get('prototype_placement_radius', 0.95)}"
+            f"{model_config.get('prototype_placement_radius', 0.40)}"
         )
-        lines.append("[bold]Auxiliary losses:[/bold] none (geometry-only)")
+        lines.append(
+            f"[bold]Temperature:[/bold] τ={model_config.get('temperature', 0.1)}"
+        )
+        cw = model_config.get('centripetal_weight', 1.0)
+        ct = model_config.get('centripetal_target_norm', 0.5)
+        lines.append(
+            f"[bold]Centripetal:[/bold] λ={cw}, r_target={ct}"
+        )
 
     lines.append(
         f"[bold]Optimizer:[/bold] Adam (lr={train_cfg.get('learning_rate', 5e-4)}, "

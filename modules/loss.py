@@ -176,43 +176,58 @@ def hyperbolic_prototypical_loss(
     labels: Tensor,
     prototypes: Tensor,
     curvature: float = 1.0,
+    temperature: float = 0.1,
+    centripetal_weight: float = 1.0,
+    centripetal_target_norm: float = 0.5,
 ) -> Tensor:
     """
-    Prototypical loss using Poincaré geodesic distance.
+    Prototypical loss using Poincaré geodesic distance + centripetal regulariser.
 
-    ``L = -mean(log_softmax(-d_poincare(emb, proto))[correct])``
+    ``L = L_proto + λ · L_centripetal``
 
-    No auxiliary losses — the geometry itself creates the "center void"
-    effect.  This is the core hypothesis under test.
+    Where:
+      - L_proto        = ``-mean(log_softmax(-d / τ)[correct])``
+      - L_centripetal   = ``mean(relu(‖x‖ - r_target)²)``
 
-    GPU execution:
-      • Möbius addition: batched ``(B,1,D) ⊕ (1,C,D)``
-      • Norm + ``safe_arctanh``: element-wise → ``[B, C]`` distance matrix
-      • Softmax + gather: same pattern as Euclidean
+    The centripetal term creates the *centre-void* effect: it opposes the
+    prototypical pull toward prototypes, keeping known-class embeddings at
+    moderate radius.  At test time, OOD data that the network hasn't learnt
+    to "push" toward any prototype stays near the origin or wanders to the
+    boundary — both detectable.
 
     Args:
         embeddings: Batch embeddings inside the Poincaré ball ``[B, D]``.
         labels: Integer class labels ``[B]``.
-        prototypes: Frozen boundary prototypes ``[C, D]``.
+        prototypes: Class prototypes ``[C, D]``.
         curvature: Absolute curvature *c* > 0.
+        temperature: Softmax scaling τ (lower → sharper).
+        centripetal_weight: Scale factor λ for the centripetal term.
+        centripetal_target_norm: Euclidean-norm ceiling *r_target*
+            beyond which the penalty activates.
 
     Returns:
-        Scalar loss.
+        Scalar composite loss.
     """
     # ── Pairwise Poincaré distances [B, C] ───────────────────────────
-    # Broadcast: emb [B,1,D], proto [1,C,D] → [B,C,D] inside poincare_distance
     distances = poincare_distance(
         embeddings.unsqueeze(1),
         prototypes.unsqueeze(0),
         c=curvature,
     )                                                    # [B, C]
 
-    # ── Prototypical loss ────────────────────────────────────────────
-    scaled_logits = -distances
+    # ── Prototypical loss (temperature-scaled) ───────────────────────
+    scaled_logits = -distances / temperature
     log_probs = F.log_softmax(scaled_logits, dim=1)
 
     labels_idx = labels.unsqueeze(1).long()
     correct_log_probs = torch.gather(log_probs, 1, labels_idx).squeeze(1)
-    loss = -correct_log_probs.mean()
+    proto_loss = -correct_log_probs.mean()
+
+    # ── Centripetal regulariser (origin-pull) ────────────────────────
+    loss = proto_loss
+    if centripetal_weight > 0:
+        emb_norms = torch.norm(embeddings, p=2, dim=-1)
+        centripetal_loss = F.relu(emb_norms - centripetal_target_norm).pow(2).mean()
+        loss = loss + centripetal_weight * centripetal_loss
 
     return loss

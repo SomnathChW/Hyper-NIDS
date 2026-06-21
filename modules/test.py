@@ -231,15 +231,21 @@ def _classify(
         if dist_val > tau_k:
             is_unknown[i] = True
 
-    # Poincaré: additional origin-distance criterion
-    if method == "poincare" and "origin" in thresholds:
+    # Poincaré: dual-band origin-distance criterion
+    #   - Too close to origin → uncertain (centre-void)
+    #   - Too far from origin → boundary outlier
+    if method == "poincare":
         origin_dists = origin_distance(
             embeddings, c=config.get("curvature", 1.0),
         ).cpu().numpy()
-        origin_threshold = thresholds["origin"]
-        # Samples too close to origin → unknown
-        origin_unknown = origin_dists < origin_threshold
-        is_unknown = is_unknown | origin_unknown
+
+        origin_min = thresholds.get("origin_min")
+        origin_max = thresholds.get("origin_max")
+
+        if origin_min is not None:
+            is_unknown = is_unknown | (origin_dists < origin_min)
+        if origin_max is not None:
+            is_unknown = is_unknown | (origin_dists > origin_max)
 
     # Mark unknowns
     predictions[is_unknown] = "Unknown"
@@ -442,6 +448,109 @@ def _save_test_plots(
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"  ✓ Saved distance distribution → {path}")
+
+        # ── 2D Projection (UMAP/PCA) ─────────────────────────────────
+        try:
+            # Try UMAP first for better manifold visualization, fallback to PCA
+            try:
+                import umap
+                reducer = umap.UMAP(n_components=2, metric='cosine', random_state=42)
+                algo_name = "UMAP"
+            except ImportError:
+                from sklearn.decomposition import PCA
+                reducer = PCA(n_components=2)
+                algo_name = "PCA"
+            
+            # Subsample to avoid memory/time issues with massive datasets
+            max_points = 20000 if algo_name == "UMAP" else 50000
+            if len(embeddings) > max_points:
+                idx = np.random.choice(len(embeddings), max_points, replace=False)
+                plot_emb = embeddings[idx]
+                plot_is_unknown = is_unknown[idx]
+            else:
+                plot_emb = embeddings
+                plot_is_unknown = is_unknown
+
+            # Map to 2D
+            if method == "poincare":
+                # Map from Poincare to Tangent Space at origin
+                norms = np.linalg.norm(plot_emb, axis=1, keepdims=True)
+                norms_clipped = np.clip(norms, 1e-12, 1.0 - 1e-12)
+                tangent_vecs = np.arctanh(norms_clipped) * (plot_emb / norms_clipped)
+                
+                # Reduce in Euclidean Tangent Space
+                tangent_2d = reducer.fit_transform(tangent_vecs)
+                
+                # Map back to 2D Poincare Disk
+                norms_2d = np.linalg.norm(tangent_2d, axis=1, keepdims=True)
+                norms_2d_clipped = np.clip(norms_2d, 1e-12, None)
+                emb_2d = np.tanh(norms_2d_clipped) * (tangent_2d / norms_2d_clipped)
+            else:
+                emb_2d = reducer.fit_transform(plot_emb)
+
+            fig, ax = plt.subplots(figsize=(8, 8))
+            
+            # Draw unit circle if Poincare
+            if method == "poincare":
+                circle = plt.Circle((0, 0), 1.0, color='gray', fill=False, linestyle='--', alpha=0.5)
+                ax.add_patch(circle)
+                ax.set_xlim(-1.1, 1.1)
+                ax.set_ylim(-1.1, 1.1)
+
+            # Scatter Knowns
+            if len(emb_2d[~plot_is_unknown]) > 0:
+                ax.scatter(
+                    emb_2d[~plot_is_unknown, 0], emb_2d[~plot_is_unknown, 1], 
+                    c='steelblue', alpha=0.3, s=5, label='Known'
+                )
+            # Scatter Unknowns
+            if len(emb_2d[plot_is_unknown]) > 0:
+                ax.scatter(
+                    emb_2d[plot_is_unknown, 0], emb_2d[plot_is_unknown, 1], 
+                    c='tomato', alpha=0.5, s=15, label='Unknown'
+                )
+                
+            ax.set_title(f"2D Projection ({method.upper()} via {algo_name})")
+            ax.legend()
+            ax.grid(True, alpha=0.2)
+            
+            path = results_dir / f"embedding_space.png"
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            print(f"  ✓ Saved 2D embedding space ({algo_name}) → {path}")
+            
+        except Exception as e:
+            print(f"  [WARNING] Could not save 2D projection: {e}")
+
+        # ── Norm distribution (Poincaré diagnostic) ──────────────────
+        if method == "poincare":
+            try:
+                emb_norms = np.linalg.norm(embeddings, axis=1)
+                known_norms = emb_norms[~is_unknown]
+                unknown_norms = emb_norms[is_unknown]
+
+                fig, ax = plt.subplots(figsize=(10, 5))
+                if len(known_norms) > 0:
+                    ax.hist(known_norms, bins=80, alpha=0.6,
+                            label="Known", color="steelblue", density=True)
+                if len(unknown_norms) > 0:
+                    ax.hist(unknown_norms, bins=80, alpha=0.6,
+                            label="Unknown", color="tomato", density=True)
+                ax.axvline(x=0.5, color="green", linestyle="--",
+                           alpha=0.7, label="Target norm (r=0.5)")
+                ax.set_xlabel("Euclidean Norm ‖x‖ (radius in ball)")
+                ax.set_ylabel("Density")
+                ax.set_title("Embedding Norm Distribution (POINCARÉ)")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                ax.set_xlim(0, 1.0)
+
+                path = results_dir / "norm_distribution.png"
+                fig.savefig(path, dpi=150, bbox_inches="tight")
+                plt.close(fig)
+                print(f"  ✓ Saved norm distribution → {path}")
+            except Exception as e:
+                print(f"  [WARNING] Could not save norm distribution: {e}")
 
     except Exception as e:
         print(f"  [WARNING] Could not save test plots: {e}")
