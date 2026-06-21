@@ -39,7 +39,7 @@ training:
   reduce_lr_patience: 4                  
   reduce_lr_factor: 0.5
   min_learning_rate: 1.0e-06
-  threshold_percentile: 90                
+  threshold_percentile: 95                
 
 # ── Method toggle ────────────────────────────────────────────────
 method: "poincare"
@@ -58,10 +58,10 @@ euclidean:
 poincare:
   curvature: 1.0
   clip_radius: 0.95
-  prototype_placement_radius: 0.40        # moderate radius, NOT boundary
-  temperature: 0.1                        # softmax sharpness (critical)
-  centripetal_weight: 1.0                 # origin-pull regularizer λ
-  centripetal_target_norm: 0.50           # max Euclidean norm before penalty
+  prototype_placement_radius: 0.70        # higher radius = more inter-class geodesic separation
+  temperature: 0.1                        # softmax sharpness
+  centripetal_weight: 0.3                 # lighter pull — don't fight proto loss
+  centripetal_target_norm: 0.75           # allow embeddings to reach r=0.70 prototypes
 
 # ── Output paths & Plotting ──────────────────────────────────────
 model_dir: "models"

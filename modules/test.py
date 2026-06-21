@@ -231,22 +231,6 @@ def _classify(
         if dist_val > tau_k:
             is_unknown[i] = True
 
-    # Poincaré: dual-band origin-distance criterion
-    #   - Too close to origin → uncertain (centre-void)
-    #   - Too far from origin → boundary outlier
-    if method == "poincare":
-        origin_dists = origin_distance(
-            embeddings, c=config.get("curvature", 1.0),
-        ).cpu().numpy()
-
-        origin_min = thresholds.get("origin_min")
-        origin_max = thresholds.get("origin_max")
-
-        if origin_min is not None:
-            is_unknown = is_unknown | (origin_dists < origin_min)
-        if origin_max is not None:
-            is_unknown = is_unknown | (origin_dists > origin_max)
-
     # Mark unknowns
     predictions[is_unknown] = "Unknown"
 
