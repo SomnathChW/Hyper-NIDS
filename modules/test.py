@@ -222,7 +222,7 @@ def _classify(
     # Map indices to class names
     predictions = np.array([
         str(label_encoder.classes_[idx]) for idx in nearest_idx_np
-    ])
+    ], dtype=object)
 
     # Unknown detection: per-class threshold
     is_unknown = np.zeros(len(predictions), dtype=bool)
