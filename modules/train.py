@@ -527,8 +527,8 @@ def _compute_thresholds(
         all_dists, 1, labels.unsqueeze(1).long(),
     ).squeeze(1)
 
-    own_dists_np = own_dists.cpu().numpy()
-    labels_np = labels.cpu().numpy()
+    own_dists_np = own_dists.detach().cpu().numpy()
+    labels_np = labels.detach().cpu().numpy()
 
     # Global threshold
     global_threshold = float(np.percentile(own_dists_np, percentile))
@@ -539,7 +539,7 @@ def _compute_thresholds(
         c = config.get("curvature", 1.0)
         origin_dists = origin_distance(embeddings, c=c)
         thresholds["origin"] = float(
-            np.percentile(origin_dists.cpu().numpy(), 100.0 - percentile)
+            np.percentile(origin_dists.detach().cpu().numpy(), 100.0 - percentile)
         )
 
     # Per-class thresholds
