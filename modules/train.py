@@ -286,12 +286,22 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
 
             # ── Validation ───────────────────────────────────────────
             model.eval()
+            val_loss_total = 0.0
+            n_val = X_val_t.shape[0]
+            val_steps = (n_val + batch_size - 1) // batch_size
+
             with torch.no_grad():
-                val_emb = model(X_val_t)
-                val_loss = _compute_loss(
-                    val_emb, y_val_t, model.prototypes,
-                    method, model_config,
-                ).item()
+                for step in range(val_steps):
+                    start = step * batch_size
+                    end = min(start + batch_size, n_val)
+                    val_batch_emb = model(X_val_t[start:end])
+                    v_loss = _compute_loss(
+                        val_batch_emb, y_val_t[start:end], model.prototypes,
+                        method, model_config,
+                    )
+                    val_loss_total += v_loss.item()
+
+            val_loss = val_loss_total / val_steps
 
             current_lr = optimizer.param_groups[0]["lr"]
             history["loss"].append(avg_train_loss)
