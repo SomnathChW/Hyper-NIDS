@@ -168,7 +168,7 @@ def euclidean_prototypical_loss(
     return loss
 
 
-# ── Hyperbolic Geodesic Pull Loss ────────────────────────────────────────────
+# ── Hyperbolic Geodesic Pull + Push Loss ─────────────────────────────────────
 
 
 def hyperbolic_prototypical_loss(
@@ -177,32 +177,40 @@ def hyperbolic_prototypical_loss(
     prototypes: Tensor,
     curvature: float = 1.0,
     margin: float = 0.5,
+    push_margin: float = 1.0,
+    push_weight: float = 0.5,
 ) -> Tensor:
     """
-    Geodesic pull loss on the Poincaré ball — **no softmax, no push**.
+    Geodesic pull + triplet push loss on the Poincaré ball.
 
-    Each sample is penalised only by its geodesic distance to its own
-    assigned prototype.  Once the distance drops below ``margin``, the
-    loss for that sample is exactly zero.
+    Combines two complementary terms:
 
-    ``L = mean(ReLU(d_correct - margin))``
+    1. **Pull** — ``ReLU(d_correct - margin)``: each sample is attracted
+       to its assigned prototype.  Zero loss once within ``margin``.
 
-    Why this works
-    ~~~~~~~~~~~~~~
-    Prototypes are frozen at the outer boundary of the Poincaré disk,
-    already maximally separated by hyperbolic geometry.  A softmax loss
-    would add repulsive forces between them, inflating the network's
-    weights and smearing all embeddings — including unknowns — toward
-    the boundary.  By relying on a pure attractive pull, we allow
-    unknown / novel traffic to remain near the origin where the
-    distance-based threshold can catch it.
+    2. **Push** — ``ReLU(d_correct - d_wrong_min + push_margin)``: the
+       correct prototype must be at least ``push_margin`` geodesic units
+       closer than the nearest wrong prototype.  This creates a geometric
+       "moat" between class clusters without the softmax
+       boundary-inflation problem.
+
+    ``L = L_pull + push_weight · L_push``
+
+    Why both terms are needed
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
+    Pull-only has zero inter-class signal: nothing prevents class A's
+    embeddings from drifting into class B's region.  The push term
+    provides a controlled repulsive force that operates on relative
+    distances (correct vs. nearest wrong), not absolute softmax
+    probabilities, so it does not inflate embeddings toward the boundary.
 
     GPU execution
     ~~~~~~~~~~~~~
     1. Pairwise Poincaré distances via broadcast         → [B, C]
     2. ``torch.gather`` on correct-class column          → [B]
-    3. Element-wise ``ReLU(d - m)``                      → [B]
-    4. Scalar ``mean``                                   → []
+    3. ``masked_fill`` + ``min`` for nearest wrong       → [B]
+    4. Element-wise ``ReLU`` for both terms               → [B]
+    5. Scalar ``mean``                                   → []
 
     No Python loops, ``torch.compile``-friendly.
 
@@ -211,8 +219,13 @@ def hyperbolic_prototypical_loss(
         labels: Integer class labels ``[B]``.
         prototypes: Frozen boundary prototypes ``[C, D]``.
         curvature: Absolute curvature *c* > 0.
-        margin: Safe-zone radius in geodesic distance units.  Loss is
-            zero once an embedding is within ``margin`` of its prototype.
+        margin: Pull safe-zone radius in geodesic distance units.  Loss
+            is zero once an embedding is within ``margin`` of its
+            prototype.
+        push_margin: Minimum required geodesic gap between d_correct and
+            the nearest wrong prototype.  Larger values enforce stronger
+            inter-class separation.
+        push_weight: Scale factor for the push term (0.0 = disabled).
 
     Returns:
         Scalar loss.
@@ -224,11 +237,24 @@ def hyperbolic_prototypical_loss(
         c=curvature,
     )                                                    # [B, C]
 
-    # ── Gather distance to the correct prototype for each sample ─────
     labels_idx = labels.unsqueeze(1).long()              # [B, 1]
+
+    # ── Pull: distance to correct prototype ──────────────────────────
     d_correct = torch.gather(distances, 1, labels_idx).squeeze(1)  # [B]
+    pull_loss = F.relu(d_correct - margin).mean()
 
-    # ── Margin-based pull: zero loss once close enough ───────────────
-    loss = F.relu(d_correct - margin).mean()
+    # ── Push: gap from nearest wrong prototype ───────────────────────
+    if push_weight > 0.0:
+        # Mask out the correct class → find nearest wrong prototype
+        wrong_mask = torch.ones_like(distances, dtype=torch.bool)
+        wrong_mask.scatter_(1, labels_idx, False)             # [B, C]
+        d_wrong_min = distances.masked_fill(
+            ~wrong_mask, float("inf"),
+        ).min(dim=1).values                                   # [B]
 
-    return loss
+        # Triplet-style: correct must be push_margin closer than wrong
+        push_loss = F.relu(d_correct - d_wrong_min + push_margin).mean()
+
+        return pull_loss + push_weight * push_loss
+
+    return pull_loss

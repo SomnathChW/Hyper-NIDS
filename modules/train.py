@@ -203,7 +203,7 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
     lr_factor = train_cfg.get("reduce_lr_factor", 0.5)
     min_lr = train_cfg.get("min_learning_rate", 1e-6)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.003)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=lr_factor,
         patience=lr_patience, min_lr=min_lr,
@@ -457,6 +457,8 @@ def _compute_loss(
             embeddings, labels, prototypes,
             curvature=config.get("curvature", 1.0),
             margin=config.get("margin", 0.5),
+            push_margin=config.get("push_margin", 1.0),
+            push_weight=config.get("push_weight", 0.5),
         )
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -568,8 +570,11 @@ def _print_training_panel(
             f"{model_config.get('prototype_placement_radius', 0.95)}"
         )
         m = model_config.get('margin', 0.5)
-        lines.append(f"[bold]Margin:[/bold] m={m}")
-        lines.append("[bold]Loss:[/bold] geodesic-pull-only (no softmax)")
+        pm = model_config.get('push_margin', 1.0)
+        pw = model_config.get('push_weight', 0.5)
+        lines.append(f"[bold]Pull margin:[/bold] m={m}")
+        lines.append(f"[bold]Push:[/bold] margin={pm}, weight={pw}")
+        lines.append("[bold]Loss:[/bold] geodesic pull + triplet push")
 
     lines.append(
         f"[bold]Optimizer:[/bold] Adam (lr={train_cfg.get('learning_rate', 5e-4)}, "
