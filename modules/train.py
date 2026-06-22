@@ -37,7 +37,7 @@ from sklearn.preprocessing import (
 
 from modules.loss import euclidean_prototypical_loss, hyperbolic_prototypical_loss
 from modules.model import EmbeddingNetwork
-from modules.poincare_math import origin_distance, poincare_distance, project_to_ball
+from modules.poincare_math import origin_distance, poincare_centroid, poincare_distance, project_to_ball
 from modules.utils.data_utils import (
     configure_columns_from_dict,
     load_data,
@@ -348,8 +348,21 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
             all_emb_list.append(model(X_train_t[i:i+chunk_size]))
         all_emb = torch.cat(all_emb_list, dim=0)
 
+    # Compute data-derived prototypes (Fréchet means) for Poincaré
+    # The fixed orthogonal prototypes are training scaffolding;
+    # for inference, use the actual cluster centers.
+    if method == "poincare":
+        c = model_config.get("curvature", 1.0)
+        inference_prototypes = torch.stack([
+            poincare_centroid(all_emb[y_train_t == cls_idx], c=c)
+            for cls_idx in range(num_classes)
+        ])  # [C, D]
+        console.print(f"  ✓ Computed Poincaré Fréchet means for {num_classes} classes")
+    else:
+        inference_prototypes = model.prototypes
+
     thresholds, per_class_thresholds = _compute_thresholds(
-        all_emb, y_train_t, model.prototypes,
+        all_emb, y_train_t, inference_prototypes,
         method, model_config, num_classes,
         percentile=train_cfg.get("threshold_percentile", 95.0),
     )
@@ -398,6 +411,7 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
         additional_artifacts={
             "thresholds.pkl": thresholds,
             "per_class_thresholds.pkl": per_class_thresholds,
+            "inference_prototypes.pkl": inference_prototypes.cpu(),
         },
     )
 
@@ -422,6 +436,7 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "model": model,
         "prototypes": model.prototypes,
+        "inference_prototypes": inference_prototypes,
         "thresholds": thresholds,
         "per_class_thresholds": per_class_thresholds,
         "label_encoder": label_encoder,
