@@ -1,3 +1,7 @@
+
+
+e02155c58bab7741ebecf4e0154dffcf2586c1fe use this commit
+
 # PoincaréBall Experiment Configuration
 # ======================================
 # Toggle `method` between "euclidean" and "poincare" and re-run
@@ -39,7 +43,7 @@ training:
   reduce_lr_patience: 10                  
   reduce_lr_factor: 0.5
   min_learning_rate: 1.0e-06
-  threshold_percentile: 95        ## Changed from 85 to prevent origin threshold from swallowing Benign/Mirai
+  threshold_percentile: 85        ##        
 
 # ── Method toggle ────────────────────────────────────────────────
 method: "poincare"

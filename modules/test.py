@@ -118,10 +118,13 @@ def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
         for i in range(0, X_test_t.shape[0], chunk_size):
             embeddings_list.append(model(X_test_t[i:i+chunk_size]))
         embeddings = torch.cat(embeddings_list, dim=0)
-        prototypes = model.prototypes
+        fixed_prototypes = model.prototypes
+        inference_prototypes = artifacts.get("inference_prototypes", fixed_prototypes)
+        if inference_prototypes is not None and hasattr(inference_prototypes, "to"):
+            inference_prototypes = inference_prototypes.to(device)
 
         predictions, min_distances, is_unknown = _classify(
-            embeddings, prototypes, method, model_config,
+            embeddings, fixed_prototypes, inference_prototypes, method, model_config,
             thresholds, per_class_thresholds, label_encoder,
         )
 
@@ -188,7 +191,8 @@ def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
 
 def _classify(
     embeddings: torch.Tensor,
-    prototypes: torch.Tensor,
+    fixed_prototypes: torch.Tensor,
+    inference_prototypes: torch.Tensor,
     method: str,
     config: Dict[str, Any],
     thresholds: Dict[str, float],
@@ -196,30 +200,31 @@ def _classify(
     label_encoder,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Classify embeddings by nearest prototype + threshold-based unknown detection.
-
+    Classify embeddings using Decoupled Classification:
+    1. Base class from fixed_prototypes (perfect symmetric boundaries).
+    2. Threshold check from inference_prototypes (tight, centered OSR bounds).
+    
     Returns:
-        (predictions, min_distances, is_unknown) — all numpy arrays.
+        (predictions, distances_to_inferred, is_unknown) — all numpy arrays.
     """
-    # Compute distances to all prototypes [N, C]
+    # ── 1. Base Classification (Fixed Prototypes) ──
     if method == "euclidean":
-        diff = embeddings.unsqueeze(1) - prototypes.unsqueeze(0)
+        diff = embeddings.unsqueeze(1) - fixed_prototypes.unsqueeze(0)
         dist_sq = (diff * diff).sum(dim=2)
         metric = config.get("distance_metric", "squared_euclidean")
         if metric == "euclidean":
-            distances = torch.sqrt(torch.clamp(dist_sq, min=1e-12))
+            fixed_distances = torch.sqrt(torch.clamp(dist_sq, min=1e-12))
         else:
-            distances = dist_sq
+            fixed_distances = dist_sq
     else:
-        distances = poincare_distance(
+        fixed_distances = poincare_distance(
             embeddings.unsqueeze(1),
-            prototypes.unsqueeze(0),
+            fixed_prototypes.unsqueeze(0),
             c=config.get("curvature", 1.0),
         )
 
-    # Nearest prototype
-    min_dists, nearest_idx = distances.min(dim=1)
-    min_dists_np = min_dists.cpu().numpy()
+    # Nearest fixed prototype defines the base class
+    _, nearest_idx = fixed_distances.min(dim=1)
     nearest_idx_np = nearest_idx.cpu().numpy()
 
     # Map indices to class names
@@ -227,9 +232,29 @@ def _classify(
         str(label_encoder.classes_[idx]) for idx in nearest_idx_np
     ], dtype=object)
 
-    # Unknown detection: per-class threshold
+    # ── 2. OSR Thresholding (Inference Prototypes) ──
+    if method == "euclidean":
+        diff_inf = embeddings.unsqueeze(1) - inference_prototypes.unsqueeze(0)
+        dist_sq_inf = (diff_inf * diff_inf).sum(dim=2)
+        metric = config.get("distance_metric", "squared_euclidean")
+        if metric == "euclidean":
+            inf_distances = torch.sqrt(torch.clamp(dist_sq_inf, min=1e-12))
+        else:
+            inf_distances = dist_sq_inf
+    else:
+        inf_distances = poincare_distance(
+            embeddings.unsqueeze(1),
+            inference_prototypes.unsqueeze(0),
+            c=config.get("curvature", 1.0),
+        )
+
+    # Get distance to the inference prototype of the PREDICTED class
+    dist_to_inferred = torch.gather(inf_distances, 1, nearest_idx.unsqueeze(1)).squeeze(1)
+    dist_to_inferred_np = dist_to_inferred.cpu().numpy()
+
+    # Unknown detection: per-class threshold against inference distance
     is_unknown = np.zeros(len(predictions), dtype=bool)
-    for i, (cls_idx, dist_val) in enumerate(zip(nearest_idx_np, min_dists_np)):
+    for i, (cls_idx, dist_val) in enumerate(zip(nearest_idx_np, dist_to_inferred_np)):
         tau_k = per_class_thresholds.get(int(cls_idx), thresholds.get("global", float("inf")))
         if dist_val > tau_k:
             is_unknown[i] = True
@@ -247,7 +272,7 @@ def _classify(
     # Mark unknowns
     predictions[is_unknown] = "Unknown"
 
-    return predictions, min_dists_np, is_unknown
+    return predictions, dist_to_inferred_np, is_unknown
 
 
 # ── OSR Metrics ──────────────────────────────────────────────────────────────

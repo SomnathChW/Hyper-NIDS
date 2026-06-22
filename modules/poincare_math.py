@@ -247,19 +247,9 @@ def origin_distance(x: Tensor, c: float = 1.0) -> Tensor:
 
 def poincare_centroid(points: Tensor, c: float = 1.0) -> Tensor:
     """
-    Approximate Fréchet mean of points on the Poincaré ball.
-
-    The Fréchet mean minimises the sum of squared geodesic distances
-    to all input points — the Riemannian generalisation of the
-    arithmetic mean.
-
-    Algorithm:
-        1. ``log_map_zero(x_i)``  → tangent vectors at origin
-        2. Euclidean mean in tangent space
-        3. ``exp_map_zero(v̄)``   → back to the ball
-
-    This is exact when points are clustered and a good first-order
-    approximation otherwise.
+    Computes the hyperbolic centroid via the Beltrami-Klein model.
+    This provides a mathematically robust, bounded Fréchet mean approximation 
+    for off-origin clusters, avoiding the infinite distortions of origin tangent space.
 
     Args:
         points: Batch of points ``[N, D]`` inside the Poincaré ball.
@@ -268,7 +258,19 @@ def poincare_centroid(points: Tensor, c: float = 1.0) -> Tensor:
     Returns:
         Centroid ``[D]`` inside the Poincaré ball.
     """
-    tangent_vectors = log_map_zero(points, c=c)       # [N, D]
-    mean_tangent = tangent_vectors.mean(dim=0)         # [D]
-    centroid = exp_map_zero(mean_tangent.unsqueeze(0), c=c)  # [1, D]
-    return centroid.squeeze(0)                         # [D]
+    x_sqnorm = torch.sum(points * points, dim=-1, keepdim=True)
+    
+    # 1. Map Poincaré to Beltrami-Klein
+    klein_points = (2.0 * points) / (1.0 + c * x_sqnorm)
+    
+    # 2. Euclidean mean in the Klein disk
+    klein_mean = torch.mean(klein_points, dim=0)  # [D]
+    
+    # 3. Map Klein back to Poincaré
+    k_sqnorm = torch.sum(klein_mean * klein_mean)
+    # Clamp to prevent precision issues exactly at the boundary
+    k_sqnorm = torch.clamp(k_sqnorm, max=(1.0 / c) - 1e-15)
+    
+    centroid = klein_mean / (1.0 + torch.sqrt(1.0 - c * k_sqnorm))
+    
+    return centroid
