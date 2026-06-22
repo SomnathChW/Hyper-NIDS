@@ -15,7 +15,7 @@ from torch import Tensor
 def generate_orthogonal_prototypes(
     num_classes: int,
     embedding_dim: int,
-    placement_radius: float = 0.95,
+    placement_radius: float = 0.8,
 ) -> Tensor:
     """
     Create maximally separated prototype directions, scaled to

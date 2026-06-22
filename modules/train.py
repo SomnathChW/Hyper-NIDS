@@ -37,7 +37,7 @@ from sklearn.preprocessing import (
 
 from modules.loss import euclidean_prototypical_loss, hyperbolic_prototypical_loss
 from modules.model import EmbeddingNetwork
-from modules.poincare_math import origin_distance, poincare_centroid, poincare_distance, project_to_ball
+from modules.poincare_math import origin_distance, poincare_distance, project_to_ball
 from modules.utils.data_utils import (
     configure_columns_from_dict,
     load_data,
@@ -269,16 +269,6 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
-                # Poincaré: project prototypes back if they somehow got gradients
-                # (they shouldn't, since they're a buffer, but defensive)
-                if method == "poincare":
-                    with torch.no_grad():
-                        model.prototypes.copy_(
-                            project_to_ball(
-                                model.prototypes,
-                                c=model_config.get("curvature", 1.0),
-                            )
-                        )
 
                 epoch_loss += loss.item()
 
@@ -348,16 +338,9 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
             all_emb_list.append(model(X_train_t[i:i+chunk_size]))
         all_emb = torch.cat(all_emb_list, dim=0)
 
-    # Compute data-derived prototypes (Fréchet means) for Poincaré
-    # The fixed orthogonal prototypes are training scaffolding;
-    # for inference, use the actual cluster centers.
     if method == "poincare":
-        c = model_config.get("curvature", 1.0)
-        inference_prototypes = torch.stack([
-            poincare_centroid(all_emb[y_train_t == cls_idx], c=c)
-            for cls_idx in range(num_classes)
-        ])  # [C, D]
-        console.print(f"  ✓ Computed Poincaré Fréchet means for {num_classes} classes")
+        inference_prototypes = model.prototypes
+        console.print(f"  ✓ Using fixed orthogonal prototypes for {num_classes} classes")
     else:
         inference_prototypes = model.prototypes
 
@@ -471,9 +454,6 @@ def _compute_loss(
         return hyperbolic_prototypical_loss(
             embeddings, labels, prototypes,
             curvature=config.get("curvature", 1.0),
-            margin=config.get("margin", 0.5),
-            push_margin=config.get("push_margin", 1.0),
-            push_weight=config.get("push_weight", 0.5),
         )
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -582,14 +562,9 @@ def _print_training_panel(
         lines.append(f"[bold]Curvature:[/bold] c={model_config.get('curvature', 1.0)}")
         lines.append(
             f"[bold]Prototype radius:[/bold] "
-            f"{model_config.get('prototype_placement_radius', 0.95)}"
+            f"{model_config.get('prototype_placement_radius', 0.8)}"
         )
-        m = model_config.get('margin', 0.5)
-        pm = model_config.get('push_margin', 1.0)
-        pw = model_config.get('push_weight', 0.5)
-        lines.append(f"[bold]Pull margin:[/bold] m={m}")
-        lines.append(f"[bold]Push:[/bold] margin={pm}, weight={pw}")
-        lines.append("[bold]Loss:[/bold] geodesic pull + triplet push")
+        lines.append("[bold]Loss:[/bold] direct distance mean")
 
     lines.append(
         f"[bold]Optimizer:[/bold] Adam (lr={train_cfg.get('learning_rate', 5e-4)}, "

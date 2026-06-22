@@ -119,32 +119,6 @@ def exp_map_zero(v: Tensor, c: float = 1.0) -> Tensor:
     return project_to_ball(result, c)
 
 
-# ── Logarithmic map at the origin ────────────────────────────────────────────
-
-
-def log_map_zero(y: Tensor, c: float = 1.0) -> Tensor:
-    """
-    Logarithmic map at the origin (inverse of :func:`exp_map_zero`).
-
-    Maps a point *y* inside the ball back to the tangent space at origin::
-
-        log_0^c(y) = arctanh(√c ‖y‖) · y / (√c ‖y‖)
-
-    Uses :func:`safe_arctanh` internally.
-
-    Args:
-        y: Point inside the Poincaré ball ``[..., D]``.
-        c: Absolute curvature.
-
-    Returns:
-        Tangent vector at origin ``[..., D]``.
-    """
-    sqrt_c = c ** 0.5
-    y_norm = torch.norm(y, p=2, dim=-1, keepdim=True)
-    y_norm = torch.clamp(y_norm, min=_EPS_NORM)
-
-    return safe_arctanh(sqrt_c * y_norm) * y / (sqrt_c * y_norm)
-
 
 # ── Poincaré distance ────────────────────────────────────────────────────────
 
@@ -242,33 +216,4 @@ def origin_distance(x: Tensor, c: float = 1.0) -> Tensor:
     return (2.0 / sqrt_c) * safe_arctanh(sqrt_c * x_norm)
 
 
-# ── Fréchet mean (hyperbolic centroid) ───────────────────────────────────────
 
-
-def poincare_centroid(points: Tensor, c: float = 1.0) -> Tensor:
-    """
-    Approximate Fréchet mean of points on the Poincaré ball.
-
-    The Fréchet mean minimises the sum of squared geodesic distances
-    to all input points — the Riemannian generalisation of the
-    arithmetic mean.
-
-    Algorithm:
-        1. ``log_map_zero(x_i)``  → tangent vectors at origin
-        2. Euclidean mean in tangent space
-        3. ``exp_map_zero(v̄)``   → back to the ball
-
-    This is exact when points are clustered and a good first-order
-    approximation otherwise.
-
-    Args:
-        points: Batch of points ``[N, D]`` inside the Poincaré ball.
-        c: Absolute curvature.
-
-    Returns:
-        Centroid ``[D]`` inside the Poincaré ball.
-    """
-    tangent_vectors = log_map_zero(points, c=c)       # [N, D]
-    mean_tangent = tangent_vectors.mean(dim=0)         # [D]
-    centroid = exp_map_zero(mean_tangent.unsqueeze(0), c=c)  # [1, D]
-    return centroid.squeeze(0)                         # [D]
