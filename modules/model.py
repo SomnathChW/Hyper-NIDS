@@ -62,6 +62,7 @@ class EmbeddingNetwork(nn.Module):
         # Poincaré parameters
         self.curvature: float = config.get("curvature", 1.0)
         self.clip_radius: float = config.get("clip_radius", 0.95)
+        self.max_tangent_norm: float = config.get("max_tangent_norm", 1.0)
 
         # Euclidean parameters
         self.l2_normalize: bool = config.get("embedding_l2_normalize", False)
@@ -122,6 +123,14 @@ class EmbeddingNetwork(nn.Module):
             if self.l2_normalize:
                 emb = nn.functional.normalize(emb, p=2, dim=1)
         elif self.method == "poincare":
+            # Clamp tangent vector norm to prevent exp_map saturation.
+            # Without this, tanh saturates and ALL embeddings land at
+            # r ≈ 0.95 where the gradient scaling is 1/λ² ≈ 1/295.
+            emb_norm = torch.norm(emb, p=2, dim=-1, keepdim=True)
+            emb_norm = torch.clamp(emb_norm, min=1e-8)
+            clamped = torch.clamp(emb_norm, max=self.max_tangent_norm)
+            emb = emb * (clamped / emb_norm)
+
             # Map tangent vector at origin into the Poincaré ball
             emb = exp_map_zero(emb, c=self.curvature)
             emb = project_to_ball(emb, c=self.curvature, eps=1e-5)
