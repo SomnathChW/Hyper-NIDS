@@ -123,13 +123,11 @@ class EmbeddingNetwork(nn.Module):
             if self.l2_normalize:
                 emb = nn.functional.normalize(emb, p=2, dim=1)
         elif self.method == "poincare":
-            # Clamp tangent vector norm to prevent exp_map saturation.
-            # Without this, tanh saturates and ALL embeddings land at
-            # r ≈ 0.95 where the gradient scaling is 1/λ² ≈ 1/295.
-            emb_norm = torch.norm(emb, p=2, dim=-1, keepdim=True)
-            emb_norm = torch.clamp(emb_norm, min=1e-8)
-            clamped = torch.clamp(emb_norm, max=self.max_tangent_norm)
-            emb = emb * (clamped / emb_norm)
+            # Scale backbone output to prevent tanh saturation and dead gradients.
+            # A hard clamp kills gradients if the MLP output is large (derivative=0).
+            # Scaling by 0.1 keeps inputs in the linear regime of tanh initially,
+            # allowing the optimizer to smoothly learn the correct radius.
+            emb = emb * 0.1
 
             # Map tangent vector at origin into the Poincaré ball
             emb = exp_map_zero(emb, c=self.curvature)
