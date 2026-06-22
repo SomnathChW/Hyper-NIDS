@@ -427,8 +427,14 @@ def _save_test_plots(
 
         # ── Distance distribution ────────────────────────────────────
         fig, ax = plt.subplots(figsize=(10, 5))
-        known_dists = min_distances[~is_unknown]
-        unknown_dists = min_distances[is_unknown]
+        
+        if y_true is not None:
+            is_truly_unknown = (y_true == "Unknown")
+            known_dists = min_distances[~is_truly_unknown]
+            unknown_dists = min_distances[is_truly_unknown]
+        else:
+            known_dists = min_distances[~is_unknown]
+            unknown_dists = min_distances[is_unknown]
 
         if len(known_dists) > 0:
             ax.hist(known_dists, bins=50, alpha=0.6, label="Known", color="steelblue")

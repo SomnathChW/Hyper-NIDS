@@ -60,7 +60,7 @@ poincare:
   clip_radius: 0.95
   prototype_placement_radius: 0.7
   max_tangent_norm: 1.0
-  margin: 0.5
+  margin: 0.1
   push_margin: 1.5
   push_weight: 1.0
 
