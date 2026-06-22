@@ -456,7 +456,7 @@ def _compute_loss(
         return hyperbolic_prototypical_loss(
             embeddings, labels, prototypes,
             curvature=config.get("curvature", 1.0),
-            temperature=config.get("temperature", 1.0),
+            margin=config.get("margin", 0.5),
         )
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -567,9 +567,9 @@ def _print_training_panel(
             f"[bold]Prototype radius:[/bold] "
             f"{model_config.get('prototype_placement_radius', 0.95)}"
         )
-        t = model_config.get('temperature', 1.0)
-        lines.append(f"[bold]Temperature:[/bold] τ={t}")
-        lines.append("[bold]Auxiliary losses:[/bold] none (geometry-only)")
+        m = model_config.get('margin', 0.5)
+        lines.append(f"[bold]Margin:[/bold] m={m}")
+        lines.append("[bold]Loss:[/bold] geodesic-pull-only (no softmax)")
 
     lines.append(
         f"[bold]Optimizer:[/bold] Adam (lr={train_cfg.get('learning_rate', 5e-4)}, "

@@ -168,7 +168,7 @@ def euclidean_prototypical_loss(
     return loss
 
 
-# ── Hyperbolic Prototypical Loss ─────────────────────────────────────────────
+# ── Hyperbolic Geodesic Pull Loss ────────────────────────────────────────────
 
 
 def hyperbolic_prototypical_loss(
@@ -176,23 +176,43 @@ def hyperbolic_prototypical_loss(
     labels: Tensor,
     prototypes: Tensor,
     curvature: float = 1.0,
-    temperature: float = 1.0,
+    margin: float = 0.5,
 ) -> Tensor:
     """
-    Prototypical loss using Poincaré geodesic distance.
+    Geodesic pull loss on the Poincaré ball — **no softmax, no push**.
 
-    ``L = -mean(log_softmax(-d / τ)[correct])``
+    Each sample is penalised only by its geodesic distance to its own
+    assigned prototype.  Once the distance drops below ``margin``, the
+    loss for that sample is exactly zero.
 
-    Pure geometry — no auxiliary losses.  The Poincaré metric itself
-    provides exponentially growing resolution near the boundary,
-    enabling tight class clusters with natural separation.
+    ``L = mean(ReLU(d_correct - margin))``
+
+    Why this works
+    ~~~~~~~~~~~~~~
+    Prototypes are frozen at the outer boundary of the Poincaré disk,
+    already maximally separated by hyperbolic geometry.  A softmax loss
+    would add repulsive forces between them, inflating the network's
+    weights and smearing all embeddings — including unknowns — toward
+    the boundary.  By relying on a pure attractive pull, we allow
+    unknown / novel traffic to remain near the origin where the
+    distance-based threshold can catch it.
+
+    GPU execution
+    ~~~~~~~~~~~~~
+    1. Pairwise Poincaré distances via broadcast         → [B, C]
+    2. ``torch.gather`` on correct-class column          → [B]
+    3. Element-wise ``ReLU(d - m)``                      → [B]
+    4. Scalar ``mean``                                   → []
+
+    No Python loops, ``torch.compile``-friendly.
 
     Args:
         embeddings: Batch embeddings inside the Poincaré ball ``[B, D]``.
         labels: Integer class labels ``[B]``.
         prototypes: Frozen boundary prototypes ``[C, D]``.
         curvature: Absolute curvature *c* > 0.
-        temperature: Softmax scaling τ (default 1.0 = unscaled).
+        margin: Safe-zone radius in geodesic distance units.  Loss is
+            zero once an embedding is within ``margin`` of its prototype.
 
     Returns:
         Scalar loss.
@@ -204,12 +224,11 @@ def hyperbolic_prototypical_loss(
         c=curvature,
     )                                                    # [B, C]
 
-    # ── Prototypical loss ────────────────────────────────────────────
-    scaled_logits = -distances / temperature
-    log_probs = F.log_softmax(scaled_logits, dim=1)
+    # ── Gather distance to the correct prototype for each sample ─────
+    labels_idx = labels.unsqueeze(1).long()              # [B, 1]
+    d_correct = torch.gather(distances, 1, labels_idx).squeeze(1)  # [B]
 
-    labels_idx = labels.unsqueeze(1).long()
-    correct_log_probs = torch.gather(log_probs, 1, labels_idx).squeeze(1)
-    loss = -correct_log_probs.mean()
+    # ── Margin-based pull: zero loss once close enough ───────────────
+    loss = F.relu(d_correct - margin).mean()
 
     return loss

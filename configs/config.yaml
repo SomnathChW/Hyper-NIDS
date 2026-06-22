@@ -59,7 +59,7 @@ poincare:
   curvature: 1.0
   clip_radius: 0.95
   prototype_placement_radius: 0.95
-  temperature: 0.1
+  margin: 0.5
 
 # ── Output paths & Plotting ──────────────────────────────────────
 model_dir: "models"
