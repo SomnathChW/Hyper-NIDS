@@ -359,9 +359,9 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
         all_emb = torch.cat(all_emb_list, dim=0)
 
     # Compute data-derived prototypes (Fréchet means) for Poincaré
-    # The fixed orthogonal prototypes are training scaffolding;
-    # for inference, use the actual cluster centers.
-    if method == "poincare":
+    # or use the fixed orthogonal prototypes as anchors.
+    use_frechet = model_config.get("use_frechet_mean", False)
+    if method == "poincare" and use_frechet:
         c = model_config.get("curvature", 1.0)
         inference_prototypes = torch.stack([
             poincare_centroid(all_emb[y_train_t == cls_idx], c=c)
@@ -370,6 +370,8 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
         console.print(f"  ✓ Computed Poincaré Fréchet means for {num_classes} classes")
     else:
         inference_prototypes = model.prototypes
+        if method == "poincare":
+            console.print("  ✓ Using Fixed Prototypes for thresholding and inference (Option A)")
 
     thresholds, per_class_thresholds = _compute_thresholds(
         all_emb, y_train_t, inference_prototypes,
