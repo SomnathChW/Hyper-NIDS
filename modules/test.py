@@ -159,6 +159,7 @@ def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
         label_encoder,
         results_dir,
         method,
+        curvature=model_config.get("curvature", 1.0),
     )
 
     # Cleanup
@@ -397,6 +398,7 @@ def _save_test_plots(
     label_encoder,
     results_dir: Path,
     method: str,
+    curvature: float = 1.0,
 ) -> None:
     """Save confusion matrix and distance distribution plots."""
     try:
@@ -445,45 +447,77 @@ def _save_test_plots(
 
         # ── 2D Projection (UMAP/PCA) ─────────────────────────────────
         try:
-            # Try UMAP first for better manifold visualization, fallback to PCA
-            try:
-                import umap
-                reducer = umap.UMAP(n_components=2, metric='cosine', random_state=42)
-                algo_name = "UMAP"
-            except ImportError:
-                from sklearn.decomposition import PCA
-                reducer = PCA(n_components=2)
-                algo_name = "PCA"
-            
-            # Subsample to avoid memory/time issues with massive datasets
-            max_points = 20000 if algo_name == "UMAP" else 50000
-            if len(embeddings) > max_points:
-                idx = np.random.choice(len(embeddings), max_points, replace=False)
-                plot_emb = embeddings[idx]
-                plot_is_unknown = is_unknown[idx]
-            else:
-                plot_emb = embeddings
-                plot_is_unknown = is_unknown
-
-            # Map to 2D
             if method == "poincare":
-                # Map from Poincare to Tangent Space at origin
-                norms = np.linalg.norm(plot_emb, axis=1, keepdims=True)
-                norms_clipped = np.clip(norms, 1e-12, 1.0 - 1e-12)
-                tangent_vecs = np.arctanh(norms_clipped) * (plot_emb / norms_clipped)
-                
-                # Reduce in Euclidean Tangent Space
-                tangent_2d = reducer.fit_transform(tangent_vecs)
-                
-                # Map back to 2D Poincare Disk
-                norms_2d = np.linalg.norm(tangent_2d, axis=1, keepdims=True)
-                norms_2d_clipped = np.clip(norms_2d, 1e-12, None)
-                emb_2d = np.tanh(norms_2d_clipped) * (tangent_2d / norms_2d_clipped)
+                # Poincaré: compute N×N geodesic distance matrix and
+                # use UMAP with metric='precomputed'.  Standard cosine
+                # or euclidean metrics are geometrically invalid here.
+                max_points = 8000  # N×N matrix must fit in memory
+                if len(embeddings) > max_points:
+                    idx = np.random.choice(len(embeddings), max_points, replace=False)
+                    plot_emb = embeddings[idx]
+                    plot_is_unknown = is_unknown[idx]
+                else:
+                    plot_emb = embeddings
+                    plot_is_unknown = is_unknown
+
+                plot_tensor = torch.from_numpy(plot_emb).float()
+                n = len(plot_tensor)
+                dist_matrix = np.zeros((n, n), dtype=np.float32)
+                chunk = 256
+                for i in range(0, n, chunk):
+                    ei = min(i + chunk, n)
+                    row_dists = poincare_distance(
+                        plot_tensor[i:ei].unsqueeze(1),
+                        plot_tensor.unsqueeze(0),
+                        c=curvature,
+                    ).numpy()
+                    dist_matrix[i:ei] = row_dists
+
+                try:
+                    import umap
+                    reducer = umap.UMAP(
+                        metric="precomputed", n_components=2, random_state=42,
+                    )
+                    algo_name = "UMAP (Poincaré precomputed)"
+                except ImportError:
+                    from sklearn.manifold import MDS
+                    reducer = MDS(
+                        n_components=2, dissimilarity="precomputed",
+                        random_state=42, normalized_stress="auto",
+                    )
+                    algo_name = "MDS (Poincaré precomputed)"
+
+                emb_2d = reducer.fit_transform(dist_matrix)
+
+                # Scale into unit disk for visual consistency
+                max_r = np.max(np.linalg.norm(emb_2d, axis=1))
+                if max_r > 1e-12:
+                    emb_2d = emb_2d / max_r * 0.95
+
             else:
+                # Euclidean: standard UMAP / PCA
+                try:
+                    import umap
+                    reducer = umap.UMAP(n_components=2, metric='cosine', random_state=42)
+                    algo_name = "UMAP"
+                except ImportError:
+                    from sklearn.decomposition import PCA
+                    reducer = PCA(n_components=2)
+                    algo_name = "PCA"
+
+                max_points = 20000 if algo_name == "UMAP" else 50000
+                if len(embeddings) > max_points:
+                    idx = np.random.choice(len(embeddings), max_points, replace=False)
+                    plot_emb = embeddings[idx]
+                    plot_is_unknown = is_unknown[idx]
+                else:
+                    plot_emb = embeddings
+                    plot_is_unknown = is_unknown
+
                 emb_2d = reducer.fit_transform(plot_emb)
 
             fig, ax = plt.subplots(figsize=(8, 8))
-            
+
             # Draw unit circle if Poincare
             if method == "poincare":
                 circle = plt.Circle((0, 0), 1.0, color='gray', fill=False, linestyle='--', alpha=0.5)
@@ -494,25 +528,25 @@ def _save_test_plots(
             # Scatter Knowns
             if len(emb_2d[~plot_is_unknown]) > 0:
                 ax.scatter(
-                    emb_2d[~plot_is_unknown, 0], emb_2d[~plot_is_unknown, 1], 
-                    c='steelblue', alpha=0.3, s=5, label='Known'
+                    emb_2d[~plot_is_unknown, 0], emb_2d[~plot_is_unknown, 1],
+                    c='steelblue', alpha=0.3, s=5, label='Known',
                 )
             # Scatter Unknowns
             if len(emb_2d[plot_is_unknown]) > 0:
                 ax.scatter(
-                    emb_2d[plot_is_unknown, 0], emb_2d[plot_is_unknown, 1], 
-                    c='tomato', alpha=0.5, s=15, label='Unknown'
+                    emb_2d[plot_is_unknown, 0], emb_2d[plot_is_unknown, 1],
+                    c='tomato', alpha=0.5, s=15, label='Unknown',
                 )
-                
+
             ax.set_title(f"2D Projection ({method.upper()} via {algo_name})")
             ax.legend()
             ax.grid(True, alpha=0.2)
-            
+
             path = results_dir / f"embedding_space.png"
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             print(f"  ✓ Saved 2D embedding space ({algo_name}) → {path}")
-            
+
         except Exception as e:
             print(f"  [WARNING] Could not save 2D projection: {e}")
 
