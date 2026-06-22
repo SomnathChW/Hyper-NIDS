@@ -136,7 +136,8 @@ def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
     test_metrics = None
 
     if y_test is not None and target_col:
-        y_true = y_test.astype(str).to_numpy()
+        y_true_granular = y_test.astype(str).to_numpy()
+        y_true = y_true_granular.copy()
         known_labels = [str(c) for c in label_encoder.classes_]
         
         # Collapse all novel/held-out classes into "Unknown" for standard OSR evaluation
@@ -160,6 +161,7 @@ def run_testing(method: str, test_data_path: str) -> Dict[str, Any]:
         results_dir,
         method,
         curvature=model_config.get("curvature", 1.0),
+        y_true_granular=y_true_granular if y_test is not None else None,
     )
 
     # Cleanup
@@ -399,6 +401,7 @@ def _save_test_plots(
     results_dir: Path,
     method: str,
     curvature: float = 1.0,
+    y_true_granular: Optional[np.ndarray] = None,
 ) -> None:
     """Save confusion matrix and distance distribution plots."""
     try:
@@ -462,9 +465,11 @@ def _save_test_plots(
                     idx = np.random.choice(len(embeddings), max_points, replace=False)
                     plot_emb = embeddings[idx]
                     plot_is_unknown = is_unknown[idx]
+                    plot_labels = y_true_granular[idx] if y_true_granular is not None else predictions[idx]
                 else:
                     plot_emb = embeddings
                     plot_is_unknown = is_unknown
+                    plot_labels = y_true_granular if y_true_granular is not None else predictions
 
                 plot_tensor = torch.from_numpy(plot_emb).float()
                 n = len(plot_tensor)
@@ -516,13 +521,15 @@ def _save_test_plots(
                     idx = np.random.choice(len(embeddings), max_points, replace=False)
                     plot_emb = embeddings[idx]
                     plot_is_unknown = is_unknown[idx]
+                    plot_labels = y_true_granular[idx] if y_true_granular is not None else predictions[idx]
                 else:
                     plot_emb = embeddings
                     plot_is_unknown = is_unknown
+                    plot_labels = y_true_granular if y_true_granular is not None else predictions
 
                 emb_2d = reducer.fit_transform(plot_emb)
 
-            fig, ax = plt.subplots(figsize=(8, 8))
+            fig, ax = plt.subplots(figsize=(10, 8))
 
             # Draw unit circle if Poincare
             if method == "poincare":
@@ -531,22 +538,27 @@ def _save_test_plots(
                 ax.set_xlim(-1.1, 1.1)
                 ax.set_ylim(-1.1, 1.1)
 
-            # Scatter Knowns
-            if len(emb_2d[~plot_is_unknown]) > 0:
-                ax.scatter(
-                    emb_2d[~plot_is_unknown, 0], emb_2d[~plot_is_unknown, 1],
-                    c='steelblue', alpha=0.3, s=5, label='Known',
-                )
-            # Scatter Unknowns
-            if len(emb_2d[plot_is_unknown]) > 0:
-                ax.scatter(
-                    emb_2d[plot_is_unknown, 0], emb_2d[plot_is_unknown, 1],
-                    c='tomato', alpha=0.5, s=15, label='Unknown',
-                )
+            # Scatter Plot using Seaborn
+            # 'hue' for class colors, 'style' for known vs predicted-unknown marker shapes
+            sns.scatterplot(
+                x=emb_2d[:, 0],
+                y=emb_2d[:, 1],
+                hue=plot_labels,
+                style=plot_is_unknown,
+                markers={False: 'o', True: 'X'},
+                palette='tab20' if len(np.unique(plot_labels)) <= 20 else None,
+                alpha=0.7,
+                s=30,
+                ax=ax,
+                edgecolor='none'
+            )
 
             ax.set_title(f"2D Projection ({method.upper()} via {algo_name})")
-            ax.legend()
+            
+            # Place the legend outside the plot
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
             ax.grid(True, alpha=0.2)
+
 
             path = results_dir / f"embedding_space.png"
             fig.savefig(path, dpi=150, bbox_inches="tight")
