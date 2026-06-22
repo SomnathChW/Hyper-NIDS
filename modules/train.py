@@ -422,6 +422,7 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
             "thresholds.pkl": thresholds,
             "per_class_thresholds.pkl": per_class_thresholds,
             "inference_prototypes.pkl": inference_prototypes.cpu(),
+            "experiment_config.pkl": config,
         },
     )
 

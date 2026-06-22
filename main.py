@@ -25,6 +25,10 @@ def main():
     mode_group = parser.add_argument_group("Modes")
     mode_group.add_argument("--train", action="store_true", help="Train model")
     mode_group.add_argument("--test", action="store_true", help="Test model")
+    mode_group.add_argument(
+        "--recalculate", nargs=2, metavar=("METHOD", "PERCENTILE"),
+        help="Recalculate thresholds for a method at a new percentile (e.g., --recalculate euclidean 99.0)",
+    )
 
     # Training options
     train_group = parser.add_argument_group("Training Options")
@@ -47,15 +51,15 @@ def main():
     args = parser.parse_args()
 
     # Validate mode
-    modes = sum([args.train, args.test])
+    modes = sum([args.train, args.test, bool(args.recalculate)])
     if modes == 0:
-        print("[ERROR] Specify a mode: --train or --test")
+        print("[ERROR] Specify a mode: --train, --test, or --recalculate")
         sys.exit(1)
     if modes > 1:
         print("[ERROR] Only one mode may be active at a time.")
         sys.exit(1)
 
-    # Load config if provided (only for training)
+    # Load config if provided or required
     config = {}
     if args.train:
         if not args.config:
@@ -75,6 +79,14 @@ def main():
         if args.train:
             from modules.train import run_training
             run_training(config)
+
+        elif args.recalculate:
+            if args.config:
+                print("[ERROR] --config should not be used with --recalculate. It strictly uses the embedded checkpoint config.")
+                sys.exit(1)
+            method, percentile = args.recalculate
+            from modules.recalculate import run_recalculate
+            run_recalculate(method, float(percentile))
 
         elif args.test:
             if args.config:
