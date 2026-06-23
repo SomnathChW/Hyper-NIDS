@@ -10,7 +10,11 @@ data:
   max_samples_per_file: 100000
   max_samples_per_class: 100000
   hold_out: [Spoofing, Web_Attack, Reconnaissance, "SlowLoris.parquet"]
-  scaler: "standard"
+  scaling:
+    method: "log_quantile"
+    passthrough_features: []
+    quantile_n_quantiles: 1000
+    quantile_distribution: "normal"
   validation_split: 0.2
   columns:
     Label: { role: "target" }
