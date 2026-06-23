@@ -56,26 +56,19 @@ class EmbeddingNetwork(nn.Module):
         self.backbone = nn.Sequential(*layers)
 
         # ── Method-specific prototype registration ───────────────────
-        self.placement_radius = placement_radius
-        # Learnable directional base (raw coordinates)
+        # Initialize prototypes as tiny Euclidean parameters near the origin
         self.raw_prototypes = nn.Parameter(
-            torch.randn(num_classes, self.embedding_dim)
+            torch.randn(num_classes, self.embedding_dim) * 0.01
         )
 
     @property
     def prototypes(self) -> torch.Tensor:
         """
-        Dynamically anchored prototypes.
-        Euclidean: unconstrained raw parameters.
-        Poincaré: normalized to unit vectors and anchored to placement_radius.
+        Fully learnable prototypes in tangent space.
+        Poincaré: projected to the disk via exp_map_zero.
         """
         if self.method == "poincare":
-            # 1. Get directions (L2 normalized)
-            norms = torch.norm(self.raw_prototypes, p=2, dim=-1, keepdim=True).clamp_min(1e-8)
-            directions = self.raw_prototypes / norms
-            # 2. Anchor them firmly near the boundary
-            return directions * self.placement_radius
-            
+            return exp_map_zero(self.raw_prototypes, c=self.curvature)
         return self.raw_prototypes
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
