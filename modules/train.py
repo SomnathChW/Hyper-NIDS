@@ -41,6 +41,7 @@ from modules.poincare_math import origin_distance, poincare_distance, project_to
 from modules.utils.data_utils import (
     configure_columns_from_dict,
     load_data,
+    LogQuantileScaler,
     preprocess_data,
     split_features_and_target,
 )
@@ -148,9 +149,27 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
     console.print("\n[bold cyan][4/7] Preprocessing & scaling...[/bold cyan]")
     X = preprocess_data(X, handle_inf=True, handle_nan=True, fill_value=0)
 
-    scaler_name = data_cfg.get("scaler", "standard")
-    scaler_factory = SCALER_FACTORIES.get(scaler_name, StandardScaler)
-    scaler = scaler_factory()
+    scaling_cfg = data_cfg.get("scaling", {})
+    scaler_method = scaling_cfg.get("method", data_cfg.get("scaler", "standard"))
+
+    if scaler_method == "log_quantile":
+        passthrough = scaling_cfg.get("passthrough_features", [])
+        feature_cols = column_config["feature_columns"]
+        scale_cols = [c for c in feature_cols if c not in passthrough]
+        pass_cols = [c for c in feature_cols if c in passthrough]
+        
+        scaler = LogQuantileScaler(
+            scale_columns=scale_cols,
+            passthrough_columns=pass_cols,
+            n_quantiles=scaling_cfg.get("quantile_n_quantiles", 1000),
+            output_distribution=scaling_cfg.get("quantile_distribution", "normal"),
+            random_state=random_state,
+        )
+        console.print(f"  [bold cyan]Log+Quantile scaling: {len(scale_cols)} scaled, {len(pass_cols)} passthrough[/bold cyan]")
+    else:
+        scaler_factory = SCALER_FACTORIES.get(scaler_method, StandardScaler)
+        scaler = scaler_factory()
+
     X_scaled = scaler.fit_transform(X)
     console.print(f"✓ Scaled data shape: {X_scaled.shape}")
     del X
