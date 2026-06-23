@@ -72,7 +72,7 @@ poincare:
   prototype_placement_radius: 0.9
   push_margin: 1.5
   push_weight: 1.0
-  origin_pull_weight: 0.15
+  origin_pull_weight: 0.0
   reconstruction_weight: 1.0
 
 # ── Output paths & Plotting ──────────────────────────────────────
