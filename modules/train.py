@@ -513,33 +513,28 @@ def _compute_thresholds(
             c=config.get("curvature", 1.0),
         )
 
-    # Distance to own class prototype
-    own_dists = torch.gather(
-        all_dists, 1, labels.unsqueeze(1).long(),
-    ).squeeze(1)
+    # Find nearest prototype for all training samples
+    min_dists, nearest_idx = all_dists.min(dim=1)
+    min_dists_np = min_dists.cpu().numpy()
+    nearest_idx_np = nearest_idx.cpu().numpy()
 
-    own_dists_np = own_dists.cpu().numpy()
-    labels_np = labels.cpu().numpy()
-
-    # Global threshold
-    global_threshold = float(np.percentile(own_dists_np, percentile))
+    # Global threshold (based on ALL minimum distances)
+    global_threshold = float(np.percentile(min_dists_np, percentile))
     thresholds = {"global": global_threshold}
 
     # Poincaré: also compute origin-distance threshold
     if method == "poincare":
         c = config.get("curvature", 1.0)
-        origin_dists = origin_distance(embeddings, c=c)
-        thresholds["origin"] = float(
-            np.percentile(origin_dists.cpu().numpy(), 100.0 - percentile)
-        )
+        origin_dists = origin_distance(embeddings, c=c).cpu().numpy()
+        thresholds["origin"] = float(np.percentile(origin_dists, 100.0 - percentile))
 
-    # Per-class thresholds
+    # Per-class thresholds (based on samples assigned to each cluster)
     per_class: Dict[int, float] = {}
     for cls_idx in range(num_classes):
-        mask = labels_np == cls_idx
+        mask = nearest_idx_np == cls_idx
         if mask.any():
             per_class[cls_idx] = float(
-                np.percentile(own_dists_np[mask], percentile)
+                np.percentile(min_dists_np[mask], percentile)
             )
         else:
             per_class[cls_idx] = 0.0
