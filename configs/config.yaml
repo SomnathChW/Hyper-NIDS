@@ -69,8 +69,8 @@ euclidean:
 # ── Poincaré-specific settings ───────────────────────────────────
 poincare:
   curvature: 1.0
-  prototype_placement_radius: 0.98
-  push_margin: 4.0
+  prototype_placement_radius: 0.9
+  push_margin: 1.5
   push_weight: 1.0
 
 # ── Output paths & Plotting ──────────────────────────────────────
