@@ -199,51 +199,65 @@ def _classify(
     Returns:
         (predictions, min_distances, is_unknown) — all numpy arrays.
     """
-    # Compute distances to all prototypes [N, C]
-    if method == "euclidean":
-        diff = embeddings.unsqueeze(1) - prototypes.unsqueeze(0)
-        dist_sq = (diff * diff).sum(dim=2)
-        metric = config.get("distance_metric", "squared_euclidean")
-        if metric == "euclidean":
-            distances = torch.sqrt(torch.clamp(dist_sq, min=1e-12))
+    chunk_size = 8192
+    predictions_list = []
+    min_dists_list = []
+    is_unknown_list = []
+
+    for i in range(0, embeddings.shape[0], chunk_size):
+        emb_chunk = embeddings[i:i+chunk_size]
+
+        # Compute distances to all prototypes [N, C]
+        if method == "euclidean":
+            diff = emb_chunk.unsqueeze(1) - prototypes.unsqueeze(0)
+            dist_sq = (diff * diff).sum(dim=2)
+            metric = config.get("distance_metric", "squared_euclidean")
+            if metric == "euclidean":
+                distances = torch.sqrt(torch.clamp(dist_sq, min=1e-12))
+            else:
+                distances = dist_sq
         else:
-            distances = dist_sq
-    else:
-        distances = poincare_distance(
-            embeddings.unsqueeze(1),
-            prototypes.unsqueeze(0),
-            c=config.get("curvature", 1.0),
-        )
+            distances = poincare_distance(
+                emb_chunk.unsqueeze(1),
+                prototypes.unsqueeze(0),
+                c=config.get("curvature", 1.0),
+            )
 
-    # Nearest prototype
-    min_dists, nearest_idx = distances.min(dim=1)
-    min_dists_np = min_dists.cpu().numpy()
-    nearest_idx_np = nearest_idx.cpu().numpy()
+        # Nearest prototype
+        min_dists, nearest_idx = distances.min(dim=1)
+        min_dists_np = min_dists.cpu().numpy()
+        nearest_idx_np = nearest_idx.cpu().numpy()
 
-    # Map indices to class names
-    predictions = np.array([
-        str(label_encoder.classes_[idx]) for idx in nearest_idx_np
-    ], dtype=object)
+        # Map indices to class names
+        preds = np.array([
+            str(label_encoder.classes_[idx]) for idx in nearest_idx_np
+        ], dtype=object)
 
-    # Unknown detection: per-class threshold
-    is_unknown = np.zeros(len(predictions), dtype=bool)
-    for i, (cls_idx, dist_val) in enumerate(zip(nearest_idx_np, min_dists_np)):
-        tau_k = per_class_thresholds.get(int(cls_idx), thresholds.get("global", float("inf")))
-        if dist_val > tau_k:
-            is_unknown[i] = True
+        # Unknown detection: per-class threshold
+        is_unk = np.zeros(len(preds), dtype=bool)
+        for j, (cls_idx, dist_val) in enumerate(zip(nearest_idx_np, min_dists_np)):
+            tau_k = per_class_thresholds.get(int(cls_idx), thresholds.get("global", float("inf")))
+            if dist_val > tau_k:
+                is_unk[j] = True
 
-    # Poincaré: additional origin-distance criterion
-    if method == "poincare" and "origin" in thresholds:
-        origin_dists = origin_distance(
-            embeddings, c=config.get("curvature", 1.0),
-        ).cpu().numpy()
-        origin_threshold = thresholds["origin"]
-        # Samples too close to origin → unknown
-        origin_unknown = origin_dists < origin_threshold
-        is_unknown = is_unknown | origin_unknown
+        # Poincaré: additional origin-distance criterion
+        if method == "poincare" and "origin" in thresholds:
+            origin_dists = origin_distance(
+                emb_chunk, c=config.get("curvature", 1.0),
+            ).cpu().numpy()
+            origin_threshold = thresholds["origin"]
+            origin_unknown = origin_dists < origin_threshold
+            is_unk = is_unk | origin_unknown
 
-    # Mark unknowns
-    predictions[is_unknown] = "Unknown"
+        preds[is_unk] = "Unknown"
+
+        predictions_list.append(preds)
+        min_dists_list.append(min_dists_np)
+        is_unknown_list.append(is_unk)
+
+    predictions = np.concatenate(predictions_list)
+    min_dists_np = np.concatenate(min_dists_list)
+    is_unknown = np.concatenate(is_unknown_list)
 
     return predictions, min_dists_np, is_unknown
 

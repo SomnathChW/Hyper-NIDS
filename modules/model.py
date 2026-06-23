@@ -7,7 +7,6 @@ import torch.nn as nn
 from typing import Any, Dict, List
 
 from modules.poincare_math import exp_map_zero
-from modules.prototypes import generate_orthogonal_prototypes
 
 
 class EmbeddingNetwork(nn.Module):
@@ -57,19 +56,27 @@ class EmbeddingNetwork(nn.Module):
         self.backbone = nn.Sequential(*layers)
 
         # ── Method-specific prototype registration ───────────────────
+        self.placement_radius = placement_radius
+        # Learnable directional base (raw coordinates)
+        self.raw_prototypes = nn.Parameter(
+            torch.randn(num_classes, self.embedding_dim)
+        )
+
+    @property
+    def prototypes(self) -> torch.Tensor:
+        """
+        Dynamically anchored prototypes.
+        Euclidean: unconstrained raw parameters.
+        Poincaré: normalized to unit vectors and anchored to placement_radius.
+        """
         if self.method == "poincare":
-            # Frozen boundary prototypes — no gradients
-            self.register_buffer(
-                "prototypes",
-                generate_orthogonal_prototypes(
-                    num_classes, self.embedding_dim, placement_radius,
-                ),
-            )
-        elif self.method == "euclidean":
-            # Just in case we need to compare against Euclidean
-            self.prototypes = nn.Parameter(
-                torch.randn(num_classes, self.embedding_dim)
-            )
+            # 1. Get directions (L2 normalized)
+            norms = torch.norm(self.raw_prototypes, p=2, dim=-1, keepdim=True).clamp_min(1e-8)
+            directions = self.raw_prototypes / norms
+            # 2. Anchor them firmly near the boundary
+            return directions * self.placement_radius
+            
+        return self.raw_prototypes
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
