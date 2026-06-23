@@ -475,6 +475,7 @@ def _compute_loss(
             curvature=config.get("curvature", 1.0),
             push_margin=config.get("push_margin", 4.0),
             push_weight=config.get("push_weight", 1.0),
+            origin_pull_weight=config.get("origin_pull_weight", 0.0),
         )
     else:
         raise ValueError(f"Unknown method: {method}")

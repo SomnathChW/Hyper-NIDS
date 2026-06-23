@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from modules.poincare_math import poincare_distance
+from modules.poincare_math import poincare_distance, origin_distance
 
 
 # ── Supervised Contrastive Loss (shared helper) ──────────────────────────────
@@ -178,6 +178,7 @@ def hyperbolic_prototypical_loss(
     curvature: float = 1.0,
     push_margin: float = 4.0,
     push_weight: float = 1.0,
+    origin_pull_weight: float = 0.0,
     **kwargs
 ) -> Tensor:
     """
@@ -234,5 +235,10 @@ def hyperbolic_prototypical_loss(
         loss = pull_loss + push_weight * push_loss + proto_push_loss
     else:
         loss = pull_loss
+
+    # ── Activation Penalty (Origin Pull) ─────────────────────────────
+    if origin_pull_weight > 0.0:
+        origin_dists = origin_distance(embeddings, c=curvature)
+        loss = loss + origin_pull_weight * origin_dists.mean()
 
     return loss
