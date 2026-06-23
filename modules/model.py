@@ -58,15 +58,10 @@ class EmbeddingNetwork(nn.Module):
 
         # ── Method-specific prototype registration ───────────────────
         if self.method == "poincare":
-            # 1. Get perfectly spaced unit vectors
+            # Start with perfectly spaced unit directions
             ortho_dirs = generate_orthogonal_prototypes(num_classes, self.embedding_dim, placement_radius=1.0)
-            
-            # 2. Map the desired radius to tangent space norm via arctanh
-            tangent_norm = torch.atanh(torch.tensor(placement_radius).clamp_max(0.999))
-            
-            # 3. Initialize the raw parameters in tangent space
-            tangent_protos = ortho_dirs * tangent_norm
-            self.raw_prototypes = nn.Parameter(tangent_protos)
+            self.raw_prototypes = nn.Parameter(ortho_dirs)
+            self.placement_radius = placement_radius
         else:
             # Euclidean prototypes start near origin
             self.raw_prototypes = nn.Parameter(
@@ -76,11 +71,14 @@ class EmbeddingNetwork(nn.Module):
     @property
     def prototypes(self) -> torch.Tensor:
         """
-        Fully learnable prototypes in tangent space.
-        Poincaré: projected to the disk via exp_map_zero.
+        Fixed radius, learnable angles.
         """
         if self.method == "poincare":
-            return exp_map_zero(self.raw_prototypes, c=self.curvature)
+            # 1. Extract purely the direction
+            norms = torch.norm(self.raw_prototypes, p=2, dim=-1, keepdim=True).clamp_min(1e-8)
+            directions = self.raw_prototypes / norms
+            # 2. Anchor firmly to the boundary
+            return directions * self.placement_radius
         return self.raw_prototypes
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
