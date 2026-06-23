@@ -10,6 +10,8 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Union, List
 
+from sklearn.preprocessing import QuantileTransformer
+
 
 # ── Column configuration ────────────────────────────────────────────────────
 
@@ -306,3 +308,74 @@ def preprocess_data(
             )
 
     return X_clean
+
+
+class LogQuantileScaler:
+    """
+    Two-stage feature scaler: log-compress → QuantileTransformer.
+    
+    Selectively scales only specified columns; passes through the rest.
+    Fully picklable for checkpoint serialization.
+    
+    Pipeline per scaled feature:
+        x → sign(x) · ln(1 + |x|) → QuantileTransformer
+    """
+    
+    def __init__(self, scale_columns, passthrough_columns,
+                 n_quantiles=1000, output_distribution='normal',
+                 random_state=42):
+        self.scale_columns = list(scale_columns)
+        self.passthrough_columns = list(passthrough_columns)
+        self.n_quantiles = n_quantiles
+        self.output_distribution = output_distribution
+        self.random_state = random_state
+        self.quantile_transformer_ = None
+        self.all_columns_ = None   # column order from fit()
+
+    def _log_transform(self, X):
+        """Symmetric log: sign(x) · ln(1 + |x|). Handles zeros and negatives."""
+        return np.sign(X) * np.log1p(np.abs(X))
+
+    def fit(self, X):
+        self.all_columns_ = list(X.columns)
+        # Validate
+        missing = [c for c in self.scale_columns if c not in X.columns]
+        if missing:
+            raise ValueError(f"Scale columns not in data: {missing}")
+        
+        # If there's nothing to scale, just return self
+        if not self.scale_columns:
+            return self
+            
+        X_to_scale = X[self.scale_columns].values.astype(np.float64)
+        X_log = self._log_transform(X_to_scale)
+        
+        self.quantile_transformer_ = QuantileTransformer(
+            n_quantiles=min(self.n_quantiles, max(1, X_log.shape[0])),
+            output_distribution=self.output_distribution,
+            random_state=self.random_state,
+        )
+        self.quantile_transformer_.fit(X_log)
+        return self
+
+    def transform(self, X):
+        # Reconstruct full array preserving original column order
+        result = np.empty((X.shape[0], len(self.all_columns_)), dtype=np.float64)
+        
+        X_qt = None
+        if self.scale_columns and self.quantile_transformer_ is not None:
+            X_to_scale = X[self.scale_columns].values.astype(np.float64)
+            X_log = self._log_transform(X_to_scale)
+            X_qt = self.quantile_transformer_.transform(X_log)
+        
+        for i, col in enumerate(self.all_columns_):
+            if col in self.scale_columns and X_qt is not None:
+                qt_idx = self.scale_columns.index(col)
+                result[:, i] = X_qt[:, qt_idx]
+            else:
+                result[:, i] = X[col].values.astype(np.float64)
+        return result
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
