@@ -7,6 +7,7 @@ import torch.nn as nn
 from typing import Any, Dict, List
 
 from modules.poincare_math import exp_map_zero
+from modules.prototypes import generate_orthogonal_prototypes
 
 
 class EmbeddingNetwork(nn.Module):
@@ -56,10 +57,21 @@ class EmbeddingNetwork(nn.Module):
         self.backbone = nn.Sequential(*layers)
 
         # ── Method-specific prototype registration ───────────────────
-        # Initialize prototypes as tiny Euclidean parameters near the origin
-        self.raw_prototypes = nn.Parameter(
-            torch.randn(num_classes, self.embedding_dim) * 0.01
-        )
+        if self.method == "poincare":
+            # 1. Get perfectly spaced unit vectors
+            ortho_dirs = generate_orthogonal_prototypes(num_classes, self.embedding_dim, placement_radius=1.0)
+            
+            # 2. Map the desired radius to tangent space norm via arctanh
+            tangent_norm = torch.atanh(torch.tensor(placement_radius).clamp_max(0.999))
+            
+            # 3. Initialize the raw parameters in tangent space
+            tangent_protos = ortho_dirs * tangent_norm
+            self.raw_prototypes = nn.Parameter(tangent_protos)
+        else:
+            # Euclidean prototypes start near origin
+            self.raw_prototypes = nn.Parameter(
+                torch.randn(num_classes, self.embedding_dim) * 0.01
+            )
 
     @property
     def prototypes(self) -> torch.Tensor:
