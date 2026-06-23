@@ -358,10 +358,10 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
         all_emb = torch.cat(all_emb_list, dim=0)
 
     if method == "poincare":
-        inference_prototypes = model.prototypes
-        console.print(f"  ✓ Using fixed orthogonal prototypes for {num_classes} classes")
+        inference_prototypes = model.prototypes.detach()
+        console.print(f"  ✓ Using dynamically anchored prototypes for {num_classes} classes")
     else:
-        inference_prototypes = model.prototypes
+        inference_prototypes = model.prototypes.detach()
 
     thresholds, per_class_thresholds = _compute_thresholds(
         all_emb, y_train_t, inference_prototypes,
