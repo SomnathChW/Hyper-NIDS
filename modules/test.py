@@ -407,6 +407,12 @@ def _save_test_plots(
         import matplotlib.pyplot as plt
         import seaborn as sns
 
+        # Use true labels if available, otherwise fallback to predictions
+        if y_true is not None:
+            plot_mask_unknown = (y_true == "Unknown")
+        else:
+            plot_mask_unknown = is_unknown
+
         # ── Confusion matrix ─────────────────────────────────────────
         if y_true is not None:
             unique = sorted(set(y_true.tolist() + predictions.tolist()))
@@ -428,13 +434,8 @@ def _save_test_plots(
         # ── Distance distribution ────────────────────────────────────
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        if y_true is not None:
-            is_truly_unknown = (y_true == "Unknown")
-            known_dists = min_distances[~is_truly_unknown]
-            unknown_dists = min_distances[is_truly_unknown]
-        else:
-            known_dists = min_distances[~is_unknown]
-            unknown_dists = min_distances[is_unknown]
+        known_dists = min_distances[~plot_mask_unknown]
+        unknown_dists = min_distances[plot_mask_unknown]
 
         if len(known_dists) > 0:
             ax.hist(known_dists, bins=50, alpha=0.6, label="Known", color="steelblue")
@@ -461,10 +462,10 @@ def _save_test_plots(
                 if len(embeddings) > max_points:
                     idx = np.random.choice(len(embeddings), max_points, replace=False)
                     plot_emb = embeddings[idx]
-                    plot_is_unknown = is_unknown[idx]
+                    plot_is_unknown = plot_mask_unknown[idx]
                 else:
                     plot_emb = embeddings
-                    plot_is_unknown = is_unknown
+                    plot_is_unknown = plot_mask_unknown
 
                 plot_tensor = torch.from_numpy(plot_emb).float()
                 n = len(plot_tensor)
@@ -515,10 +516,10 @@ def _save_test_plots(
                 if len(embeddings) > max_points:
                     idx = np.random.choice(len(embeddings), max_points, replace=False)
                     plot_emb = embeddings[idx]
-                    plot_is_unknown = is_unknown[idx]
+                    plot_is_unknown = plot_mask_unknown[idx]
                 else:
                     plot_emb = embeddings
-                    plot_is_unknown = is_unknown
+                    plot_is_unknown = plot_mask_unknown
 
                 emb_2d = reducer.fit_transform(plot_emb)
 
@@ -560,8 +561,8 @@ def _save_test_plots(
         if method == "poincare":
             try:
                 emb_norms = np.linalg.norm(embeddings, axis=1)
-                known_norms = emb_norms[~is_unknown]
-                unknown_norms = emb_norms[is_unknown]
+                known_norms = emb_norms[~plot_mask_unknown]
+                unknown_norms = emb_norms[plot_mask_unknown]
 
                 fig, ax = plt.subplots(figsize=(10, 5))
                 if len(known_norms) > 0:
@@ -570,8 +571,8 @@ def _save_test_plots(
                 if len(unknown_norms) > 0:
                     ax.hist(unknown_norms, bins=80, alpha=0.6,
                             label="Unknown", color="tomato", density=True)
-                ax.axvline(x=0.5, color="green", linestyle="--",
-                           alpha=0.7, label="Target norm (r=0.5)")
+                ax.axvline(x=0.7, color="green", linestyle="--",
+                           alpha=0.7, label="Target norm (r=0.7)")
                 ax.set_xlabel("Euclidean Norm ‖x‖ (radius in ball)")
                 ax.set_ylabel("Density")
                 ax.set_title("Embedding Norm Distribution (POINCARÉ)")
