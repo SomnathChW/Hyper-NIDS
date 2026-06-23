@@ -56,6 +56,17 @@ class EmbeddingNetwork(nn.Module):
 
         self.backbone = nn.Sequential(*layers)
 
+        # ── Reconstruction Decoder ───────────────────────────────────
+        self.reconstruction_weight = config.get(self.method, {}).get("reconstruction_weight", 0.0)
+        if self.reconstruction_weight > 0.0:
+            self.decoder = nn.Sequential(
+                nn.Linear(self.embedding_dim, 256),
+                nn.ReLU(),
+                nn.Linear(256, 512),
+                nn.ReLU(),
+                nn.Linear(512, input_dim)
+            )
+
         # ── Method-specific prototype registration ───────────────────
         if self.method == "poincare":
             # Start with perfectly spaced unit directions
@@ -81,7 +92,7 @@ class EmbeddingNetwork(nn.Module):
             return directions * self.placement_radius
         return self.raw_prototypes
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_recon: bool = False) -> torch.Tensor:
         """
         Forward pass: input features → embedding space.
         """
@@ -89,8 +100,14 @@ class EmbeddingNetwork(nn.Module):
         emb = self.backbone(x)
         emb = self.final_layer(emb)
 
+        recon = None
+        if return_recon and self.reconstruction_weight > 0.0:
+            recon = self.decoder(emb)
+
         if self.method == "poincare":
             # The Bridge: project into the hyperbolic fishbowl
             emb = exp_map_zero(emb, c=self.curvature)
 
+        if return_recon:
+            return emb, recon
         return emb

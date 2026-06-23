@@ -278,11 +278,18 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
 
                 optimizer.zero_grad(set_to_none=True)
 
-                embeddings = model(x_batch)
+                embeddings, recons = model(x_batch, return_recon=True)
                 loss = _compute_loss(
                     embeddings, y_batch, model.prototypes,
                     method, model_config,
                 )
+                
+                # Add Reconstruction Loss
+                recon_weight = model_config.get("reconstruction_weight", 0.0)
+                if recon_weight > 0.0 and recons is not None:
+                    mse_loss = torch.nn.functional.mse_loss(recons, x_batch)
+                    loss = loss + recon_weight * mse_loss
+                    
                 loss.backward()
                 # Gradient clipping
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -296,11 +303,18 @@ def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
             # ── Validation ───────────────────────────────────────────
             model.eval()
             with torch.no_grad():
-                val_emb = model(X_val_t)
-                val_loss = _compute_loss(
+                val_emb, val_recons = model(X_val_t, return_recon=True)
+                val_loss_tensor = _compute_loss(
                     val_emb, y_val_t, model.prototypes,
                     method, model_config,
-                ).item()
+                )
+                
+                recon_weight = model_config.get("reconstruction_weight", 0.0)
+                if recon_weight > 0.0 and val_recons is not None:
+                    val_mse = torch.nn.functional.mse_loss(val_recons, X_val_t)
+                    val_loss_tensor = val_loss_tensor + recon_weight * val_mse
+                    
+                val_loss = val_loss_tensor.item()
 
             current_lr = optimizer.param_groups[0]["lr"]
             history["loss"].append(avg_train_loss)
