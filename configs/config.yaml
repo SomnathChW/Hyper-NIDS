@@ -37,8 +37,8 @@ data:
 
 # ── Shared backbone architecture ─────────────────────────────────
 backbone:
-  hidden_layers: [96, 64, 32]           
-  embedding_dim: 16                       
+  hidden_layers: [1024, 512, 256]           
+  embedding_dim: 128                       
   activation: "relu"
   dropout_rate: 0.2
 
