@@ -473,6 +473,8 @@ def _compute_loss(
         return hyperbolic_prototypical_loss(
             embeddings, labels, prototypes,
             curvature=config.get("curvature", 1.0),
+            push_margin=config.get("push_margin", 4.0),
+            push_weight=config.get("push_weight", 1.0),
         )
     else:
         raise ValueError(f"Unknown method: {method}")

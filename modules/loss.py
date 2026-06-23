@@ -176,13 +176,17 @@ def hyperbolic_prototypical_loss(
     labels: Tensor,
     prototypes: Tensor,
     curvature: float = 1.0,
+    push_margin: float = 4.0,
+    push_weight: float = 1.0,
     **kwargs
 ) -> Tensor:
     """
-    Direct hyperbolic distance loss.
+    Direct hyperbolic distance loss with Margin-Based Triplet Push.
     
     Calculates the Poincaré distance between each embedding and its
-    correct class prototype, and returns the average.
+    correct class prototype (Pull). Simultaneously calculates the distance
+    to the closest incorrect prototype and penalizes if it is within
+    `push_margin` (Push).
     """
     # ── Pairwise Poincaré distances [B, C] ───────────────────────────
     distances = poincare_distance(
@@ -193,10 +197,26 @@ def hyperbolic_prototypical_loss(
 
     labels_idx = labels.unsqueeze(1).long()              # [B, 1]
 
-    # ── Distance to correct prototype ────────────────────────────────
+    # ── Distance to correct prototype (Pull) ─────────────────────────
     d_correct = torch.gather(distances, 1, labels_idx).squeeze(1)  # [B]
-    
-    # Simple average of distances
-    loss = d_correct.mean()
+    pull_loss = d_correct.mean()
+
+    # ── Distance to closest incorrect prototype (Push) ───────────────
+    if push_weight > 0.0:
+        # Create a mask where True = incorrect classes
+        mask = torch.ones_like(distances, dtype=torch.bool)
+        mask.scatter_(1, labels_idx, False)
+        
+        # Fill correct distances with inf so they aren't chosen as minimum
+        d_incorrect_all = distances.masked_fill(~mask, float('inf'))
+        d_closest_incorrect, _ = d_incorrect_all.min(dim=1)  # [B]
+        
+        # Hinge penalty: max(0, margin - distance)
+        push_penalty = F.relu(push_margin - d_closest_incorrect)
+        push_loss = push_penalty.mean()
+        
+        loss = pull_loss + push_weight * push_loss
+    else:
+        loss = pull_loss
 
     return loss
