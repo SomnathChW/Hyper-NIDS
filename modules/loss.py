@@ -215,7 +215,23 @@ def hyperbolic_prototypical_loss(
         push_penalty = F.relu(push_margin - d_closest_incorrect)
         push_loss = push_penalty.mean()
         
-        loss = pull_loss + push_weight * push_loss
+        # ── Prototype Repulsion (Push Prototypes Apart) ──────────────────
+        # Distance between all pairs of prototypes
+        proto_dists = poincare_distance(
+            prototypes.unsqueeze(1),
+            prototypes.unsqueeze(0),
+            c=curvature
+        )
+        
+        # Mask out self-distances (diagonal)
+        num_protos = prototypes.size(0)
+        proto_mask = ~torch.eye(num_protos, dtype=torch.bool, device=prototypes.device)
+        
+        # Penalize prototypes that are closer than push_margin
+        proto_penalty = F.relu(push_margin - proto_dists)
+        proto_push_loss = proto_penalty[proto_mask].mean()
+        
+        loss = pull_loss + push_weight * push_loss + proto_push_loss
     else:
         loss = pull_loss
 
